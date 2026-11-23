@@ -33,6 +33,7 @@ class VideoRenderer:
         end_time: float,
         output_filepath: str,
         cookies_path: Optional[str] = None,
+        proxy: Optional[str] = None,
     ) -> List[str]:
         """
         Builds yt-dlp command using --download-sections to download ONLY the specified cutscene window.
@@ -55,6 +56,9 @@ class VideoRenderer:
             "--no-playlist",
         ]
         cmd.extend(CookieManager.get_ytdlp_cookie_args(cookies_path))
+        p = proxy or os.environ.get("YOUTUBE_PROXY")
+        if p:
+            cmd.extend(["--proxy", p])
         cmd.append(video_url)
         return cmd
 

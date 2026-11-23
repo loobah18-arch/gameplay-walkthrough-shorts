@@ -19,7 +19,17 @@ class WalkthroughFetcher:
         self.temp_dir = temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
 
-    def fetch_video_info(self, url: str, cookies_path: Optional[str] = None) -> Dict[str, Any]:
+    @staticmethod
+    def get_proxy_args(proxy: Optional[str] = None) -> List[str]:
+        """Returns yt-dlp arguments for proxy if provided or present in environment."""
+        p = proxy or os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+        if p:
+            return ["--proxy", p]
+        return []
+
+    def fetch_video_info(
+        self, url: str, cookies_path: Optional[str] = None, proxy: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Retrieves video metadata, chapters, and available resolutions without downloading media.
         """
@@ -30,6 +40,7 @@ class WalkthroughFetcher:
             "--no-playlist",
         ]
         cmd.extend(CookieManager.get_ytdlp_cookie_args(cookies_path))
+        cmd.extend(self.get_proxy_args(proxy))
         cmd.append(url)
 
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -62,7 +73,12 @@ class WalkthroughFetcher:
         }
 
     def fetch_transcript(
-        self, url: str, video_id: str, cookies_path: Optional[str] = None, lang: str = "en"
+        self,
+        url: str,
+        video_id: str,
+        cookies_path: Optional[str] = None,
+        proxy: Optional[str] = None,
+        lang: str = "en",
     ) -> List[Dict[str, Any]]:
         """
         Downloads VTT subtitles and parses them into timestamped cue dicts.
@@ -78,6 +94,7 @@ class WalkthroughFetcher:
             "-o", out_template,
         ]
         cmd.extend(CookieManager.get_ytdlp_cookie_args(cookies_path))
+        cmd.extend(self.get_proxy_args(proxy))
         cmd.append(url)
 
         subprocess.run(cmd, capture_output=True, text=True, check=False)

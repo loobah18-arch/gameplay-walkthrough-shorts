@@ -134,13 +134,19 @@ jobs:
             SUBS_FLAG=(--enable-subtitles)
           fi
 
+          PROXY_ARGS=()
+          if [ -n "${{ secrets.YOUTUBE_PROXY }}" ]; then
+            PROXY_ARGS=(--proxy "${{ secrets.YOUTUBE_PROXY }}")
+          fi
+
           python3 cli.py render-cloud-job \
             --url "$VIDEO_URL" \
             --start "$START_TIME" \
             --end "$END_TIME" \
             --aspect-ratio "$ASPECT_RATIO" \
             "${SUBS_FLAG[@]}" \
-            "${COOKIE_ARGS[@]}"
+            "${COOKIE_ARGS[@]}" \
+            "${PROXY_ARGS[@]}"
 
       - name: 📦 Upload Generated Video Artifact
         if: always()

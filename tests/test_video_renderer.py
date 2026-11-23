@@ -10,11 +10,14 @@ class TestVideoRenderer(unittest.TestCase):
             end_time=175.0,
             output_filepath="temp/raw.mp4",
             cookies_path="cookies.txt",
+            proxy="http://user:pass@proxy.example.com:8080",
         )
         self.assertIn("--download-sections", cmd)
         self.assertIn("*00:02:00-00:02:55", cmd)
         self.assertIn("--cookies", cmd)
         self.assertIn("cookies.txt", cmd)
+        self.assertIn("--proxy", cmd)
+        self.assertIn("http://user:pass@proxy.example.com:8080", cmd)
         self.assertIn("https://youtube.com/watch?v=12345", cmd)
 
     def test_build_ffmpeg_filtergraph_square(self):

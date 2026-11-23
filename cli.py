@@ -67,7 +67,7 @@ def cmd_fetch_info(args):
     fetcher = WalkthroughFetcher()
     print(f"🔍 Fetching metadata for: {args.url}")
     try:
-        info = fetcher.fetch_video_info(args.url, cookies_path=args.cookies)
+        info = fetcher.fetch_video_info(args.url, cookies_path=args.cookies, proxy=args.proxy)
         print("\n========================================")
         print(f"🎬 Title: {info['title']}")
         print(f"📺 Channel: {info['channel']}")
@@ -91,11 +91,11 @@ def cmd_analyze(args):
     analyzer = CutsceneAnalyzer()
 
     print(f"🔍 Fetching video info and transcript for: {args.url}")
-    info = fetcher.fetch_video_info(args.url, cookies_path=args.cookies)
+    info = fetcher.fetch_video_info(args.url, cookies_path=args.cookies, proxy=args.proxy)
     video_id = info["id"]
 
     print("📥 Extracting dialogue cues from subtitles...")
-    cues = fetcher.fetch_transcript(args.url, video_id=video_id, cookies_path=args.cookies)
+    cues = fetcher.fetch_transcript(args.url, video_id=video_id, cookies_path=args.cookies, proxy=args.proxy)
 
     if not cues:
         print("⚠️ No subtitles found for this video. You can still manually clip using --start and --end timestamps.")
@@ -175,6 +175,7 @@ def cmd_render_cloud_job(args):
         end_time=end_time,
         output_filepath=temp_raw,
         cookies_path=args.cookies,
+        proxy=args.proxy,
     )
     import subprocess
     subprocess.run(download_cmd, check=True)
@@ -183,7 +184,7 @@ def cmd_render_cloud_job(args):
     if args.enable_subtitles:
         print("📝 Generating styled ASS subtitles...")
         fetcher = WalkthroughFetcher()
-        cues = fetcher.fetch_transcript(video_url, video_id="current", cookies_path=args.cookies)
+        cues = fetcher.fetch_transcript(video_url, video_id="current", cookies_path=args.cookies, proxy=args.proxy)
         # Filter cues to this clip's time range
         clip_cues = [c for c in cues if c["start"] >= (start_time - 1.0) and c["end"] <= (end_time + 1.0)]
         if clip_cues:
@@ -229,6 +230,7 @@ def main():
     p_info = subparsers.add_parser("fetch-info", help="Fetch walkthrough video metadata")
     p_info.add_argument("url", help="YouTube video URL")
     p_info.add_argument("--cookies", help="Path to cookies.txt")
+    p_info.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_info.set_defaults(func=cmd_fetch_info)
 
     # analyze
@@ -239,6 +241,7 @@ def main():
     p_analyze.add_argument("--min-dur", type=int, default=25, help="Minimum clip duration in seconds")
     p_analyze.add_argument("--max-dur", type=int, default=58, help="Maximum clip duration in seconds")
     p_analyze.add_argument("--cookies", help="Path to cookies.txt")
+    p_analyze.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_analyze.add_argument("--repo", default="loobah18-arch/gameplay-walkthrough-shorts", help="GitHub repo")
     p_analyze.set_defaults(func=cmd_analyze)
 
@@ -264,6 +267,7 @@ def main():
     p_cloud.add_argument("--aspect-ratio", default="square", choices=list(ASPECT_RATIOS.keys()))
     p_cloud.add_argument("--enable-subtitles", action="store_true", default=True)
     p_cloud.add_argument("--cookies", help="Path to cookies.txt")
+    p_cloud.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_cloud.add_argument("--output", help="Output filename")
     p_cloud.set_defaults(func=cmd_render_cloud_job)
 
