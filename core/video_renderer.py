@@ -35,6 +35,7 @@ class VideoRenderer:
         cookies_path: Optional[str] = None,
         proxy: Optional[str] = None,
         client_override: str = "ios,android",
+        use_cookies: bool = True,
     ) -> List[str]:
         """
         Builds yt-dlp command using --download-sections to download ONLY the specified cutscene window.
@@ -56,7 +57,11 @@ class VideoRenderer:
             "-o", output_filepath,
             "--no-playlist",
         ]
-        cmd.extend(CookieManager.get_ytdlp_cookie_args(cookies_path))
+        if use_cookies and cookies_path and os.path.isfile(cookies_path):
+            cmd.extend(["--cookies", cookies_path])
+        elif not use_cookies:
+            cmd.append("--no-cookies")
+
         p = proxy or os.environ.get("YOUTUBE_PROXY")
         if p:
             cmd.extend(["--proxy", p])
@@ -102,6 +107,7 @@ class VideoRenderer:
                 cookies_path=cookies_path,
                 proxy=proxy,
                 client_override="web,mweb",
+                use_cookies=True,
             )
             res1 = subprocess.run(cmd1, check=False)
             if res1.returncode == 0 and cls.check_file_exists(output_filepath):
@@ -118,6 +124,7 @@ class VideoRenderer:
             cookies_path=None,
             proxy=proxy,
             client_override="ios,android",
+            use_cookies=False,
         )
         res2 = subprocess.run(cmd2, check=False)
         if res2.returncode == 0 and cls.check_file_exists(output_filepath):
@@ -134,6 +141,7 @@ class VideoRenderer:
             cookies_path=None,
             proxy=proxy,
             client_override="visionos",
+            use_cookies=False,
         )
         subprocess.run(cmd3, check=True)
         return output_filepath
