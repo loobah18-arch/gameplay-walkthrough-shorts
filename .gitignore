@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.log
+.env
+
+# Output and temporary media
+output/
+downloads/
+temp/
+*.vtt
+*.srt
+*.ass
+*.mp4
+*.mkv
+*.webm
+*.part
+*.ytdl
+
+# Cookies and credentials
+cookies.txt
+youtube_cookies.txt
+*.cookies
+client_secrets.json
+token.json

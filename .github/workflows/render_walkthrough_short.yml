@@ -1,0 +1,152 @@
+name: 🎮 Render Gameplay Walkthrough Short
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Walkthrough / Cutscene Video URL'
+        required: true
+        default: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      start_time:
+        description: 'Start timestamp in seconds (or HH:MM:SS)'
+        required: true
+        default: '0'
+      end_time:
+        description: 'End timestamp in seconds (or HH:MM:SS)'
+        required: true
+        default: '55'
+      aspect_ratio:
+        description: 'Aspect ratio (square 1:1 like SaisenGames kepvkxTGqVM, or vertical 9:16)'
+        required: true
+        default: 'square'
+        type: choice
+        options:
+          - 'square'
+          - 'square_hd'
+          - 'vertical_crop'
+          - 'vertical_blurred'
+      title:
+        description: 'Title for the generated Short'
+        required: false
+        default: 'Epic Cutscene Moment'
+      game_name:
+        description: 'Game Name (e.g., Detroit: Become Human, GTA 6)'
+        required: false
+        default: 'Detroit: Become Human'
+      enable_subtitles:
+        description: 'Burn dynamic ASS subtitles'
+        required: false
+        default: true
+        type: boolean
+      upload_to_youtube:
+        description: 'Upload generated Short to YouTube'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: walkthrough-short-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  render_short:
+    name: 🎬 Render Walkthrough Short (Cloud Worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      # PO Token Provider to bypass YouTube bot detection
+      bgutil-provider:
+        image: brainicism/bgutil-ytdlp-pot-provider:latest
+        ports:
+          - 4416:4416
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 📦 Install FFmpeg & System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libass-dev fonts-montserrat fonts-dejavu-core
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🔍 Verify Anti-Bot Service Health
+        run: |
+          echo "Checking bgutil PO token service..."
+          for i in 1 2 3 4 5; do
+            if curl -sf http://127.0.0.1:4416/ping 2>/dev/null; then
+              echo "✅ bgutil PO token provider is healthy on port 4416"
+              break
+            fi
+            echo "Waiting for bgutil service to initialize..."
+            sleep 2
+          done
+
+      - name: 🍪 Decode YouTube Cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import os, base64
+          raw = os.environ.get('YOUTUBE_COOKIES', '').strip()
+          if raw:
+              decoded = base64.b64decode(raw).decode('utf-8', errors='ignore') if ('# Netscape' not in raw and '\t' not in raw) else raw
+              with open('youtube_cookies.txt', 'w', encoding='utf-8') as f:
+                  f.write(decoded)
+              print('🍪 Successfully decoded YOUTUBE_COOKIES secret to youtube_cookies.txt')
+          else:
+              print('⚠️ No YOUTUBE_COOKIES secret configured. Will attempt download via public client.')
+          "
+
+      - name: 🎬 Render Walkthrough Short
+        id: render
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          START_TIME: ${{ inputs.start_time }}
+          END_TIME: ${{ inputs.end_time }}
+          ASPECT_RATIO: ${{ inputs.aspect_ratio }}
+          ENABLE_SUBS: ${{ inputs.enable_subtitles }}
+        run: |
+          set -euo pipefail
+          COOKIE_ARGS=()
+          if [ -f youtube_cookies.txt ]; then
+            COOKIE_ARGS=(--cookies youtube_cookies.txt)
+          fi
+
+          SUBS_FLAG=()
+          if [ "$ENABLE_SUBS" = "true" ]; then
+            SUBS_FLAG=(--enable-subtitles)
+          fi
+
+          python3 cli.py render-cloud-job \
+            --url "$VIDEO_URL" \
+            --start "$START_TIME" \
+            --end "$END_TIME" \
+            --aspect-ratio "$ASPECT_RATIO" \
+            "${SUBS_FLAG[@]}" \
+            "${COOKIE_ARGS[@]}"
+
+      - name: 📦 Upload Generated Video Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gameplay-short-${{ inputs.aspect_ratio }}
+          path: output/*.mp4
+          retention-days: 14
+          if-no-files-found: error
