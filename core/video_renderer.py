@@ -51,8 +51,7 @@ class VideoRenderer:
             "yt-dlp",
             "--download-sections", section,
             "--force-keyframes-at-cuts",
-            "-f", "bestvideo+bestaudio/best",
-            "--merge-output-format", "mp4",
+            "--extractor-args", "youtube:player_client=ios,android",
             "-o", output_filepath,
             "--no-playlist",
         ]

@@ -1,3 +1,4 @@
 yt-dlp>=2024.08.06
+yt-dlp-ejs
 pytest>=7.4.0
 requests>=2.31.0
