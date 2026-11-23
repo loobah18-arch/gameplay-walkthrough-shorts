@@ -168,8 +168,8 @@ def cmd_render_cloud_job(args):
     os.makedirs("output", exist_ok=True)
 
     # 1. Download specific section via yt-dlp
-    print(f"📥 Downloading section {start_time}s to {end_time}s with cookies...")
-    download_cmd = VideoRenderer.build_ytdlp_download_cmd(
+    print(f"📥 Downloading section {start_time}s to {end_time}s...")
+    VideoRenderer.download_video_section(
         video_url=video_url,
         start_time=start_time,
         end_time=end_time,
@@ -177,8 +177,6 @@ def cmd_render_cloud_job(args):
         cookies_path=args.cookies,
         proxy=args.proxy,
     )
-    import subprocess
-    subprocess.run(download_cmd, check=True)
 
     # Locate actual downloaded file
     actual_raw = temp_raw

@@ -34,6 +34,7 @@ class VideoRenderer:
         output_filepath: str,
         cookies_path: Optional[str] = None,
         proxy: Optional[str] = None,
+        client_override: str = "ios,android",
     ) -> List[str]:
         """
         Builds yt-dlp command using --download-sections to download ONLY the specified cutscene window.
@@ -51,7 +52,7 @@ class VideoRenderer:
             "yt-dlp",
             "--download-sections", section,
             "--force-keyframes-at-cuts",
-            "--extractor-args", "youtube:player_client=ios,android",
+            "--extractor-args", f"youtube:player_client={client_override}",
             "-o", output_filepath,
             "--no-playlist",
         ]
@@ -61,6 +62,81 @@ class VideoRenderer:
             cmd.extend(["--proxy", p])
         cmd.append(video_url)
         return cmd
+
+    @staticmethod
+    def check_file_exists(path: str) -> bool:
+        """Returns True if the output file or a common media extension variant exists and is non-empty."""
+        if os.path.isfile(path) and os.path.getsize(path) > 10000:
+            return True
+        base, _ = os.path.splitext(path)
+        for ext in [".mp4", ".mkv", ".webm"]:
+            cand = base + ext
+            if os.path.isfile(cand) and os.path.getsize(cand) > 10000:
+                return True
+        return False
+
+    @classmethod
+    def download_video_section(
+        cls,
+        video_url: str,
+        start_time: float,
+        end_time: float,
+        output_filepath: str,
+        cookies_path: Optional[str] = None,
+        proxy: Optional[str] = None,
+    ) -> str:
+        """
+        Multi-tier robust downloader:
+        Tier 1: Try with cookies using web/mweb player clients.
+        Tier 2: Try mobile client (ios,android) WITHOUT cookies (omits cookies because yt-dlp skips mobile on cookies).
+        Tier 3: Try visionos client.
+        """
+        # Tier 1: Cookies with web/mweb
+        if cookies_path and os.path.isfile(cookies_path):
+            print("🔄 [Tier 1] Trying download with cookies (web/mweb)...")
+            cmd1 = cls.build_ytdlp_download_cmd(
+                video_url=video_url,
+                start_time=start_time,
+                end_time=end_time,
+                output_filepath=output_filepath,
+                cookies_path=cookies_path,
+                proxy=proxy,
+                client_override="web,mweb",
+            )
+            res1 = subprocess.run(cmd1, check=False)
+            if res1.returncode == 0 and cls.check_file_exists(output_filepath):
+                print("✅ [Tier 1] Download succeeded with cookies.")
+                return output_filepath
+
+        # Tier 2: Native iOS/Android mobile client (NO cookies to prevent skipping)
+        print("🔄 [Tier 2] Falling back to native iOS/Android client without cookies...")
+        cmd2 = cls.build_ytdlp_download_cmd(
+            video_url=video_url,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=output_filepath,
+            cookies_path=None,
+            proxy=proxy,
+            client_override="ios,android",
+        )
+        res2 = subprocess.run(cmd2, check=False)
+        if res2.returncode == 0 and cls.check_file_exists(output_filepath):
+            print("✅ [Tier 2] Download succeeded via mobile client.")
+            return output_filepath
+
+        # Tier 3: Apple VisionOS fallback
+        print("🔄 [Tier 3] Falling back to VisionOS client...")
+        cmd3 = cls.build_ytdlp_download_cmd(
+            video_url=video_url,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=output_filepath,
+            cookies_path=None,
+            proxy=proxy,
+            client_override="visionos",
+        )
+        subprocess.run(cmd3, check=True)
+        return output_filepath
 
     @classmethod
     def build_ffmpeg_filtergraph(
