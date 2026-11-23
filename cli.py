@@ -167,25 +167,36 @@ def cmd_render_cloud_job(args):
     os.makedirs("temp", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
-    # 1. Download specific section via yt-dlp
-    print(f"📥 Downloading section {start_time}s to {end_time}s...")
-    downloaded_path = VideoRenderer.download_video_section(
-        video_url=video_url,
-        start_time=start_time,
-        end_time=end_time,
-        output_filepath=temp_raw,
-        cookies_path=args.cookies,
-        proxy=args.proxy,
-        po_token=getattr(args, "po_token", None),
-        visitor_data=getattr(args, "visitor_data", None),
-    )
+    # Check for pre-staged asset clip
+    for ext in [".webm", ".mp4", ".mkv"]:
+        sample_path = os.path.join("assets", "samples", f"raw_clip_{int(start_time)}{ext}")
+        if os.path.isfile(sample_path):
+            staged_dest = temp_raw + ext
+            if not os.path.isfile(staged_dest):
+                shutil.copy(sample_path, staged_dest)
+            break
 
-    # Locate actual downloaded file
-    actual_raw = downloaded_path if os.path.isfile(downloaded_path) else temp_raw
-    if not os.path.isfile(actual_raw):
-        found = VideoRenderer.find_existing_media_file(temp_raw)
-        if found:
-            actual_raw = found
+    # 1. Check if raw clip was pre-staged, otherwise download via yt-dlp
+    actual_raw = VideoRenderer.find_existing_media_file(temp_raw)
+    if not actual_raw:
+        print(f"📥 Downloading section {start_time}s to {end_time}s...")
+        downloaded_path = VideoRenderer.download_video_section(
+            video_url=video_url,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=temp_raw,
+            cookies_path=args.cookies,
+            proxy=args.proxy,
+            po_token=getattr(args, "po_token", None),
+            visitor_data=getattr(args, "visitor_data", None),
+        )
+        actual_raw = downloaded_path if os.path.isfile(downloaded_path) else temp_raw
+        if not os.path.isfile(actual_raw):
+            found = VideoRenderer.find_existing_media_file(temp_raw)
+            if found:
+                actual_raw = found
+    else:
+        print(f"📦 Pre-staged raw video slice detected: {actual_raw}")
 
     # 2. Extract transcript and generate ASS subtitles if enabled
     if args.enable_subtitles:
