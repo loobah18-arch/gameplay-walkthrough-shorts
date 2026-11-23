@@ -92,3 +92,43 @@ DRAMATIC_KEYWORDS = [
     "stop", "wait", "look at me", "why did you", "don't do this", "it's over",
     "never again", "who are you", "what have you done",
 ]
+
+# Payoff Detection & Narrative Arc Keywords
+PAYOFF_KEYWORDS: Dict[str, list] = {
+    "mic_drop": [
+        "that is my purpose", "just a machine", "not a living being", "it's over",
+        "never again", "whatever you want me to be", "wake up", "goodbye",
+        "you lose", "i win", "too late", "game over", "now you know",
+        "i don't care", "nothing personal", "my choice", "i am free",
+        "i'm alive", "we are alive", "not this time",
+        "you don't own me", "who i am", "i feel alive", "there is no choice",
+        "see you around", "have a nice life", "i'm done", "we're done",
+        "it ends here", "rest in peace", "welcome to", "not today",
+    ],
+    "decision_or_climax": [
+        "shoot", "pull the trigger", "don't shoot", "spare", "kill him",
+        "i have to", "i had no choice", "i won't do it", "i refuse",
+        "i made my choice", "i decide", "leave now", "drop your weapon",
+        "i surrender", "take me instead", "forgive me", "i can't do that",
+        "i must obey", "stand down", "i won't let you", "make your move",
+        "let him go", "let her go", "finish it", "fight me", "no more",
+    ],
+    "revelation_or_truth": [
+        "the truth is", "i lied", "you lied to me", "i am", "you are",
+        "all along", "it was you", "i remember", "i know who i am",
+        "you're not human", "you're one of us", "you're a deviant",
+        "this is who i am", "i finally understand", "now i see",
+        "i knew it", "you never cared", "it was all a lie",
+    ],
+}
+
+# Terminal connector words that indicate an UNFINISHED sentence (Incomplete, NO payoff)
+UNFINISHED_SENTENCE_TRAILS = [
+    "and", "or", "but", "so", "then", "because", "if", "when", "while",
+    "although", "that", "which", "to", "with", "as", "about", "for", "like",
+    "uh", "um", "well", "gonna", "wanna",
+    # Articles & determiners
+    "the", "a", "an", "this", "these", "those", "my", "your", "his", "her", "their", "our", "its",
+    # Prepositions
+    "into", "onto", "from", "by", "in", "on", "at", "of",
+]

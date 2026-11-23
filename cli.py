@@ -87,7 +87,7 @@ def cmd_fetch_info(args):
 
 
 def cmd_analyze(args):
-    """Downloads transcript (zero video bytes) and identifies top dramatic cutscene moments."""
+    """Downloads transcript (zero video bytes) and identifies top dramatic cutscene moments with payoffs."""
     fetcher = WalkthroughFetcher()
     analyzer = CutsceneAnalyzer()
 
@@ -102,27 +102,43 @@ def cmd_analyze(args):
         print("⚠️ No subtitles found for this video. You can still manually clip using --start and --end timestamps.")
         sys.exit(0)
 
-    print(f"✅ Found {len(cues)} dialogue cues. Scoring dramatic tension...")
-    segments = analyzer.find_viral_segments(cues, min_duration=args.min_dur, max_duration=args.max_dur)
+    require_payoff = not getattr(args, "allow_open_ended", False)
+    print(f"✅ Found {len(cues)} dialogue cues. Scoring dramatic tension & payoffs (require_payoff={require_payoff})...")
+    segments = analyzer.find_viral_segments(
+        cues,
+        min_duration=args.min_dur,
+        max_duration=args.max_dur,
+        require_payoff=require_payoff,
+    )
 
     print("\n=======================================================")
     print(f"🔥 Top {len(segments)} Dramatic Cutscene Moments Found:")
     print("=======================================================")
     for idx, seg in enumerate(segments, 1):
-        title = analyzer.generate_short_title(args.game, seg["sample_dialogue"].split("|")[0])
+        title = analyzer.generate_short_title(
+            args.game,
+            seg["sample_dialogue"].split("|")[0],
+            payoff_phrase=seg.get("payoff_line"),
+        )
         print(f"\n#{idx} [Score: {seg['score']}]  {seg['start']}s -> {seg['end']}s ({seg['duration']}s)")
         print(f"   Proposed Title: \"{title}\"")
+        print(f"   🎯 Payoff [{seg.get('payoff_type', 'none')}]: \"{seg.get('payoff_line', '')}\" (Beat: {seg.get('pause_after', 0)}s, Score: {seg.get('payoff_score', 0)})")
         print(f"   Dialogue: \"{seg['sample_dialogue']}\"")
 
     if segments:
         top = segments[0]
         print("\n💡 Recommended Cloud Dispatch Command:")
         dispatcher = CloudDispatcher(repo=args.repo)
+        title = analyzer.generate_short_title(
+            args.game,
+            top["sample_dialogue"].split("|")[0],
+            payoff_phrase=top.get("payoff_line"),
+        )
         spec = dispatcher.generate_clip_spec(
             video_url=args.url,
             start_time=top["start"],
             end_time=top["end"],
-            title=analyzer.generate_short_title(args.game, top["sample_dialogue"].split("|")[0]),
+            title=title,
             game_name=args.game,
             aspect_ratio=args.aspect_ratio,
         )
@@ -266,6 +282,7 @@ def main():
     p_analyze.add_argument("--cookies", help="Path to cookies.txt")
     p_analyze.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_analyze.add_argument("--repo", default="loobah18-arch/gameplay-walkthrough-shorts", help="GitHub repo")
+    p_analyze.add_argument("--allow-open-ended", action="store_true", default=False, help="Allow clips without a decisive payoff/climax")
     p_analyze.set_defaults(func=cmd_analyze)
 
     # dispatch

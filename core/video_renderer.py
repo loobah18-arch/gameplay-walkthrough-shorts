@@ -74,7 +74,7 @@ class VideoRenderer:
         if vis:
             cmd.extend(["--extractor-args", f"youtube:visitor_data={vis}"])
 
-        if use_cookies and cookies_path and os.path.isfile(cookies_path):
+        if use_cookies and cookies_path:
             cmd.extend(["--cookies", cookies_path])
         elif not use_cookies:
             cmd.append("--no-cookies")
