@@ -51,7 +51,8 @@ class VideoRenderer:
             "yt-dlp",
             "--download-sections", section,
             "--force-keyframes-at-cuts",
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
             "-o", output_filepath,
             "--no-playlist",
         ]

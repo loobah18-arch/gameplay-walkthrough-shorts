@@ -180,23 +180,36 @@ def cmd_render_cloud_job(args):
     import subprocess
     subprocess.run(download_cmd, check=True)
 
+    # Locate actual downloaded file
+    actual_raw = temp_raw
+    if not os.path.isfile(actual_raw):
+        base, _ = os.path.splitext(temp_raw)
+        for cand in [base + ".mp4", base + ".mkv", base + ".webm"]:
+            if os.path.isfile(cand):
+                actual_raw = cand
+                break
+
     # 2. Extract transcript and generate ASS subtitles if enabled
     if args.enable_subtitles:
-        print("📝 Generating styled ASS subtitles...")
-        fetcher = WalkthroughFetcher()
-        cues = fetcher.fetch_transcript(video_url, video_id="current", cookies_path=args.cookies, proxy=args.proxy)
-        # Filter cues to this clip's time range
-        clip_cues = [c for c in cues if c["start"] >= (start_time - 1.0) and c["end"] <= (end_time + 1.0)]
-        if clip_cues:
-            SubtitleBuilder.generate_ass(
-                cues=clip_cues,
-                output_path=ass_path,
-                aspect_ratio_key=args.aspect_ratio,
-                time_offset=start_time,
-            )
-            print(f"✅ Generated ASS subtitles at {ass_path}")
-        else:
-            print("ℹ️ No subtitle cues found in this time range; rendering without burned subtitles.")
+        try:
+            print("📝 Generating styled ASS subtitles...")
+            fetcher = WalkthroughFetcher()
+            cues = fetcher.fetch_transcript(video_url, video_id="current", cookies_path=args.cookies, proxy=args.proxy)
+            # Filter cues to this clip's time range
+            clip_cues = [c for c in cues if c["start"] >= (start_time - 1.0) and c["end"] <= (end_time + 1.0)]
+            if clip_cues:
+                SubtitleBuilder.generate_ass(
+                    cues=clip_cues,
+                    output_path=ass_path,
+                    aspect_ratio_key=args.aspect_ratio,
+                    time_offset=start_time,
+                )
+                print(f"✅ Generated ASS subtitles at {ass_path}")
+            else:
+                print("ℹ️ No subtitle cues found in this time range; rendering without burned subtitles.")
+                ass_path = None
+        except Exception as e:
+            print(f"⚠️ Subtitle generation error ({e}); rendering without burned subtitles.")
             ass_path = None
     else:
         ass_path = None
@@ -205,7 +218,7 @@ def cmd_render_cloud_job(args):
     print(f"🎥 Rendering final Short (Aspect Ratio: {args.aspect_ratio})...")
     renderer = VideoRenderer(output_dir="output", temp_dir="temp")
     final_path = renderer.render_short(
-        raw_video_path=temp_raw,
+        raw_video_path=actual_raw,
         output_filename=output_filename,
         aspect_ratio=args.aspect_ratio,
         ass_subtitle_path=ass_path,
