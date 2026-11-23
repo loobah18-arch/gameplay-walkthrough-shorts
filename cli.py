@@ -6,6 +6,7 @@ and orchestrating cloud renders on GitHub Actions.
 """
 import sys
 import os
+import shutil
 import argparse
 import json
 from typing import Optional
