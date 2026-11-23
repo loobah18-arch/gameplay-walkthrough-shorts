@@ -11,6 +11,8 @@ class TestVideoRenderer(unittest.TestCase):
             output_filepath="temp/raw.mp4",
             cookies_path="cookies.txt",
             proxy="http://user:pass@proxy.example.com:8080",
+            po_token="test_po_token_123",
+            visitor_data="test_visitor_data_456",
         )
         self.assertIn("--download-sections", cmd)
         self.assertIn("*00:02:00-00:02:55", cmd)
@@ -19,6 +21,8 @@ class TestVideoRenderer(unittest.TestCase):
         self.assertIn("--proxy", cmd)
         self.assertIn("http://user:pass@proxy.example.com:8080", cmd)
         self.assertIn("https://youtube.com/watch?v=12345", cmd)
+        self.assertIn("youtube:po_token=web.gvs+test_po_token_123", cmd)
+        self.assertIn("youtube:visitor_data=test_visitor_data_456", cmd)
 
     def test_build_ffmpeg_filtergraph_square(self):
         fg = VideoRenderer.build_ffmpeg_filtergraph(

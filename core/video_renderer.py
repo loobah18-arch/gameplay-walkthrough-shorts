@@ -29,42 +29,64 @@ class VideoRenderer:
     @staticmethod
     def build_ytdlp_download_cmd(
         video_url: str,
-        start_time: float,
-        end_time: float,
-        output_filepath: str,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        output_filepath: str = "temp/clip.mp4",
         cookies_path: Optional[str] = None,
         proxy: Optional[str] = None,
-        client_override: str = "ios,android",
+        client_override: str = "web,mweb",
         use_cookies: bool = True,
+        po_token: Optional[str] = None,
+        visitor_data: Optional[str] = None,
+        format_spec: str = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/22/18/b",
+        use_download_sections: bool = True,
     ) -> List[str]:
         """
-        Builds yt-dlp command using --download-sections to download ONLY the specified cutscene window.
-        Avoids downloading multi-gigabyte entire walkthrough files.
+        Builds yt-dlp command using --download-sections or full file ingestion.
+        Enforces IPv4, Node.js runtime, native downloader, and PO tokens.
         """
-        # Format section: *HH:MM:SS-HH:MM:SS
-        def to_hms(s: float) -> str:
-            h = int(s // 3600)
-            m = int((s % 3600) // 60)
-            sec = int(s % 60)
-            return f"{h:02d}:{m:02d}:{sec:02d}"
-
-        section = f"*{to_hms(start_time)}-{to_hms(end_time)}"
         cmd = [
             "yt-dlp",
-            "--download-sections", section,
-            "--force-keyframes-at-cuts",
-            "--extractor-args", f"youtube:player_client={client_override}",
-            "-o", output_filepath,
+            "-4",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
             "--no-playlist",
+            "--socket-timeout", "45",
         ]
+
+        if use_download_sections and start_time is not None and end_time is not None:
+            def to_hms(s: float) -> str:
+                h = int(s // 3600)
+                m = int((s % 3600) // 60)
+                sec = int(s % 60)
+                return f"{h:02d}:{m:02d}:{sec:02d}"
+
+            section = f"*{to_hms(start_time)}-{to_hms(end_time)}"
+            cmd.extend(["--download-sections", section, "--force-keyframes-at-cuts"])
+
+        if client_override:
+            cmd.extend(["--extractor-args", f"youtube:player_client={client_override}"])
+
+        pot = po_token or os.environ.get("YT_PO_TOKEN")
+        vis = visitor_data or os.environ.get("YT_VISITOR_DATA")
+        if pot:
+            cmd.extend(["--extractor-args", f"youtube:po_token=web.gvs+{pot}"])
+        if vis:
+            cmd.extend(["--extractor-args", f"youtube:visitor_data={vis}"])
+
         if use_cookies and cookies_path and os.path.isfile(cookies_path):
             cmd.extend(["--cookies", cookies_path])
         elif not use_cookies:
             cmd.append("--no-cookies")
 
+        cmd.extend(["--downloader", "native"])
+        cmd.extend(["--format", format_spec])
+        cmd.extend(["-o", output_filepath])
+
         p = proxy or os.environ.get("YOUTUBE_PROXY")
         if p:
             cmd.extend(["--proxy", p])
+
         cmd.append(video_url)
         return cmd
 
@@ -89,34 +111,67 @@ class VideoRenderer:
         output_filepath: str,
         cookies_path: Optional[str] = None,
         proxy: Optional[str] = None,
+        po_token: Optional[str] = None,
+        visitor_data: Optional[str] = None,
     ) -> str:
         """
-        Multi-tier robust downloader:
-        Tier 1: Try with cookies using web/mweb player clients.
-        Tier 2: Try mobile client (ios,android) WITHOUT cookies (omits cookies because yt-dlp skips mobile on cookies).
-        Tier 3: Try visionos client.
+        Multi-tier cascading downloader:
+        Tier 1: Section download with cookies + PO Token + web/mweb.
+        Tier 2: Section download with progressive format bypass (22/18).
+        Tier 3: Mobile client (ios,android) WITHOUT cookies.
+        Tier 4: VisionOS client fallback.
+        Tier 5: Full native download format 22/18 + local ffmpeg cut.
         """
-        # Tier 1: Cookies with web/mweb
-        if cookies_path and os.path.isfile(cookies_path):
-            print("🔄 [Tier 1] Trying download with cookies (web/mweb)...")
-            cmd1 = cls.build_ytdlp_download_cmd(
-                video_url=video_url,
-                start_time=start_time,
-                end_time=end_time,
-                output_filepath=output_filepath,
-                cookies_path=cookies_path,
-                proxy=proxy,
-                client_override="web,mweb",
-                use_cookies=True,
-            )
-            res1 = subprocess.run(cmd1, check=False)
-            if res1.returncode == 0 and cls.check_file_exists(output_filepath):
-                print("✅ [Tier 1] Download succeeded with cookies.")
-                return output_filepath
+        def run_ytdlp(cmd: List[str]) -> bool:
+            print(f"▶️ Executing: {' '.join(cmd)}")
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if res.stdout:
+                print(res.stdout)
+            return res.returncode == 0 and cls.check_file_exists(output_filepath)
 
-        # Tier 2: Native iOS/Android mobile client (NO cookies to prevent skipping)
-        print("🔄 [Tier 2] Falling back to native iOS/Android client without cookies...")
+        # Tier 1: Cookies with web/mweb and PO token
+        print("🔄 [Tier 1] Trying section download with cookies + PO Token (web,mweb)...")
+        cmd1 = cls.build_ytdlp_download_cmd(
+            video_url=video_url,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=output_filepath,
+            cookies_path=cookies_path,
+            proxy=proxy,
+            client_override="web,mweb",
+            use_cookies=True,
+            po_token=po_token,
+            visitor_data=visitor_data,
+            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/22/18/b",
+            use_download_sections=True,
+        )
+        if run_ytdlp(cmd1):
+            print("✅ [Tier 1] Section download succeeded with cookies.")
+            return output_filepath
+
+        # Tier 2: Progressive format 22 / 18 section download
+        print("🔄 [Tier 2] Trying progressive format bypass (22/18) section download...")
         cmd2 = cls.build_ytdlp_download_cmd(
+            video_url=video_url,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=output_filepath,
+            cookies_path=cookies_path,
+            proxy=proxy,
+            client_override="android,mweb,web",
+            use_cookies=True,
+            po_token=po_token,
+            visitor_data=visitor_data,
+            format_spec="22/18/best[height<=720]/b",
+            use_download_sections=True,
+        )
+        if run_ytdlp(cmd2):
+            print("✅ [Tier 2] Section download succeeded with progressive format.")
+            return output_filepath
+
+        # Tier 3: Native iOS/Android mobile client (NO cookies to prevent skipping)
+        print("🔄 [Tier 3] Falling back to native iOS/Android client without cookies...")
+        cmd3 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
             start_time=start_time,
             end_time=end_time,
@@ -125,15 +180,16 @@ class VideoRenderer:
             proxy=proxy,
             client_override="ios,android",
             use_cookies=False,
+            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/22/18/b",
+            use_download_sections=True,
         )
-        res2 = subprocess.run(cmd2, check=False)
-        if res2.returncode == 0 and cls.check_file_exists(output_filepath):
-            print("✅ [Tier 2] Download succeeded via mobile client.")
+        if run_ytdlp(cmd3):
+            print("✅ [Tier 3] Download succeeded via mobile client.")
             return output_filepath
 
-        # Tier 3: Apple VisionOS fallback
-        print("🔄 [Tier 3] Falling back to VisionOS client...")
-        cmd3 = cls.build_ytdlp_download_cmd(
+        # Tier 4: Apple VisionOS fallback
+        print("🔄 [Tier 4] Falling back to VisionOS client...")
+        cmd4 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
             start_time=start_time,
             end_time=end_time,
@@ -142,9 +198,58 @@ class VideoRenderer:
             proxy=proxy,
             client_override="visionos",
             use_cookies=False,
+            use_download_sections=True,
         )
-        subprocess.run(cmd3, check=True)
-        return output_filepath
+        if run_ytdlp(cmd4):
+            print("✅ [Tier 4] Download succeeded via VisionOS client.")
+            return output_filepath
+
+        # Tier 5: Full-file progressive native download + local ffmpeg cut
+        print("🔄 [Tier 5] Fallback: Full-file progressive native download + local ffmpeg cut...")
+        temp_full = os.path.join(os.path.dirname(output_filepath), "full_source.mp4")
+        cmd5 = cls.build_ytdlp_download_cmd(
+            video_url=video_url,
+            start_time=None,
+            end_time=None,
+            output_filepath=temp_full,
+            cookies_path=cookies_path,
+            proxy=proxy,
+            client_override="android,mweb,web",
+            use_cookies=True,
+            po_token=po_token,
+            visitor_data=visitor_data,
+            format_spec="22/18/best[height<=720]/b",
+            use_download_sections=False,
+        )
+        print(f"▶️ Executing: {' '.join(cmd5)}")
+        res5 = subprocess.run(cmd5, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if res5.stdout:
+            print(res5.stdout)
+
+        actual_full = temp_full
+        if not os.path.isfile(actual_full):
+            base, _ = os.path.splitext(temp_full)
+            for cand in [base + ".mp4", base + ".webm", base + ".mkv"]:
+                if os.path.isfile(cand) and os.path.getsize(cand) > 10000:
+                    actual_full = cand
+                    break
+
+        if os.path.isfile(actual_full) and os.path.getsize(actual_full) > 10000:
+            print(f"✂️ Cutting section {start_time}s to {end_time}s locally via ffmpeg...")
+            cut_cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-to", str(end_time),
+                "-i", actual_full,
+                "-c", "copy",
+                output_filepath
+            ]
+            subprocess.run(cut_cmd, check=True)
+            if cls.check_file_exists(output_filepath):
+                print("✅ [Tier 5] Successfully extracted clip from full download.")
+                return output_filepath
+
+        raise RuntimeError(f"All download tiers failed for {video_url}")
 
     @classmethod
     def build_ffmpeg_filtergraph(

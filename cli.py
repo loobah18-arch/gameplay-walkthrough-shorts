@@ -176,6 +176,8 @@ def cmd_render_cloud_job(args):
         output_filepath=temp_raw,
         cookies_path=args.cookies,
         proxy=args.proxy,
+        po_token=getattr(args, "po_token", None),
+        visitor_data=getattr(args, "visitor_data", None),
     )
 
     # Locate actual downloaded file
@@ -279,6 +281,8 @@ def main():
     p_cloud.add_argument("--enable-subtitles", action="store_true", default=True)
     p_cloud.add_argument("--cookies", help="Path to cookies.txt")
     p_cloud.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
+    p_cloud.add_argument("--po-token", help="YouTube PO Token")
+    p_cloud.add_argument("--visitor-data", help="YouTube Visitor Data")
     p_cloud.add_argument("--output", help="Output filename")
     p_cloud.set_defaults(func=cmd_render_cloud_job)
 
