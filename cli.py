@@ -169,7 +169,7 @@ def cmd_render_cloud_job(args):
 
     # 1. Download specific section via yt-dlp
     print(f"📥 Downloading section {start_time}s to {end_time}s...")
-    VideoRenderer.download_video_section(
+    downloaded_path = VideoRenderer.download_video_section(
         video_url=video_url,
         start_time=start_time,
         end_time=end_time,
@@ -181,13 +181,11 @@ def cmd_render_cloud_job(args):
     )
 
     # Locate actual downloaded file
-    actual_raw = temp_raw
+    actual_raw = downloaded_path if os.path.isfile(downloaded_path) else temp_raw
     if not os.path.isfile(actual_raw):
-        base, _ = os.path.splitext(temp_raw)
-        for cand in [base + ".mp4", base + ".mkv", base + ".webm"]:
-            if os.path.isfile(cand):
-                actual_raw = cand
-                break
+        found = VideoRenderer.find_existing_media_file(temp_raw)
+        if found:
+            actual_raw = found
 
     # 2. Extract transcript and generate ASS subtitles if enabled
     if args.enable_subtitles:
