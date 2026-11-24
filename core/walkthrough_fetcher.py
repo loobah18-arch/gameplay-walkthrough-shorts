@@ -35,6 +35,8 @@ class WalkthroughFetcher:
         """
         cmd = [
             "yt-dlp",
+            "-4",
+            "--js-runtimes", "node",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
@@ -43,7 +45,15 @@ class WalkthroughFetcher:
         cmd.extend(self.get_proxy_args(proxy))
         cmd.append(url)
 
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError:
+            # Fallback without cookies if cookies trigger bot challenge
+            cmd_fallback = [
+                "yt-dlp", "-4", "--js-runtimes", "node", "--dump-json",
+                "--skip-download", "--no-playlist", "--no-cookies", url
+            ]
+            res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
 
         # Extract max available height and 60fps flag

@@ -15,6 +15,7 @@ from config.settings import DEFAULT_ASPECT_RATIO, ASPECT_RATIOS
 from core.cookie_manager import CookieManager
 from core.walkthrough_fetcher import WalkthroughFetcher
 from core.cutscene_analyzer import CutsceneAnalyzer
+from core.payoff_detector import ActualPayoffDetector
 from core.subtitle_builder import SubtitleBuilder
 from core.video_renderer import VideoRenderer
 from core.cloud_dispatcher import CloudDispatcher
@@ -99,8 +100,69 @@ def cmd_analyze(args):
     cues = fetcher.fetch_transcript(args.url, video_id=video_id, cookies_path=args.cookies, proxy=args.proxy)
 
     if not cues:
-        print("⚠️ No subtitles found for this video. You can still manually clip using --start and --end timestamps.")
-        sys.exit(0)
+        print("⚠️ No subtitles found for this video. Analyzing chapters for physical action climaxes & payoffs...")
+        chapters = info.get("chapters", [])
+        if not chapters:
+            print("❌ No subtitles or chapters found. Provide manual --start and --end timestamps to dispatch.")
+            sys.exit(0)
+
+        # Dramatic chapter action keywords
+        dramatic_chapter_keywords = [
+            "climax", "resolution", "choice", "consequences", "test", "interrogation",
+            "hostage", "rescue", "murder", "chase", "confrontation", "conversation",
+            "fight", "standoff", "decision", "truth", "alive"
+        ]
+
+        scored_chapters = []
+        for chap in chapters:
+            title_lower = chap.get("title", "").lower()
+            score = 5.0
+            for kw in dramatic_chapter_keywords:
+                if kw in title_lower:
+                    score += 5.0
+            # Chapters with at least 30s duration
+            dur = chap.get("end_time", 0) - chap.get("start_time", 0)
+            if dur >= 25:
+                window = ActualPayoffDetector.calculate_chapter_payoff_window(
+                    chapter_start=chap["start_time"],
+                    chapter_end=chap["end_time"],
+                    target_duration=55.0,
+                )
+                scored_chapters.append({
+                    "title": chap["title"],
+                    "score": score,
+                    "chapter_dur": dur,
+                    "window": window,
+                })
+
+        scored_chapters.sort(key=lambda x: x["score"], reverse=True)
+
+        print("\n=======================================================")
+        print(f"🎬 Top {min(5, len(scored_chapters))} Action Climax Chapters Found (Payoff-First Alignment):")
+        print("=======================================================")
+        for idx, item in enumerate(scored_chapters[:5], 1):
+            w = item["window"]
+            short_title = f"{item['title']} - Climax | {args.game}"
+            print(f"\n#{idx} [Action Score: {item['score']}] Chapter: \"{item['title']}\"")
+            print(f"   🎯 Payoff Window: {w['start']}s -> {w['end']}s ({w['duration']}s)")
+            print(f"   Arc Phase: {w['arc_phase']} (Anchored to final action resolution)")
+            print(f"   Proposed Title: \"{short_title}\"")
+
+        if scored_chapters:
+            top_w = scored_chapters[0]["window"]
+            top_title = f"{scored_chapters[0]['title']} - Climax | {args.game}"
+            print("\n💡 Recommended Cloud Dispatch Command (Anchored to Actual Payoff):")
+            dispatcher = CloudDispatcher(repo=args.repo)
+            spec = dispatcher.generate_clip_spec(
+                video_url=args.url,
+                start_time=top_w["start"],
+                end_time=top_w["end"],
+                title=top_title,
+                game_name=args.game,
+                aspect_ratio=args.aspect_ratio,
+            )
+            print(dispatcher.get_dispatch_command(spec))
+        return
 
     require_payoff = not getattr(args, "allow_open_ended", False)
     print(f"✅ Found {len(cues)} dialogue cues. Scoring dramatic tension & payoffs (require_payoff={require_payoff})...")
