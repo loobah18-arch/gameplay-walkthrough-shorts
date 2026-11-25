@@ -27,6 +27,11 @@ on:
         required: false
         default: false
         type: boolean
+      from_timer:
+        description: 'Internal trigger from exact-due auto-restart timer'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -37,8 +42,73 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight_gate:
+    name: 🕯️ 24-Hour Spacing Pre-flight Gate (Layer 0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+      remaining_seconds: ${{ steps.gate.outputs.remaining_seconds }}
+      due_at: ${{ steps.gate.outputs.due_at }}
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🕯️ Evaluate 24-Hour Upload Spacing (skip pipeline unless due)
+        id: gate
+        env:
+          PREFLIGHT_BYPASS: ${{ inputs.force_run || (github.event_name != 'schedule' && !inputs.from_timer) }}
+        run: |
+          set -euo pipefail
+          python3 core/preflight_gate.py
+
+  # When the 24h gate skips, calculate time remaining, sleep until exact due time,
+  # and automatically restart/dispatch the pipeline instead of wasting idle time.
+  exact_due_timer:
+    name: ⏰ Trigger Pipeline Exactly When 24h Is Up
+    needs: preflight_gate
+    if: needs.preflight_gate.outputs.proceed == 'false' && needs.preflight_gate.outputs.remaining_seconds != '' && fromJSON(needs.preflight_gate.outputs.remaining_seconds) > 0
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write
+    concurrency:
+      group: daily-walkthrough-exact-due-timer
+      cancel-in-progress: true
+    steps:
+      - name: ⏳ Sleep until due (${{ needs.preflight_gate.outputs.due_at }})
+        run: |
+          REM=${{ needs.preflight_gate.outputs.remaining_seconds }}
+          WAIT=$(( REM + 60 ))
+          MAX_SLEEP=20400
+          if [ "$WAIT" -gt "$MAX_SLEEP" ]; then
+            echo "Remaining wait (${WAIT}s) exceeds 5.6h runner cap. Sleeping ${MAX_SLEEP}s then chaining..."
+            sleep "$MAX_SLEEP"
+          else
+            echo "Sleeping ${WAIT}s until ${{ needs.preflight_gate.outputs.due_at }} (+60s margin)..."
+            [ "$WAIT" -gt 0 ] && sleep "$WAIT" || true
+          fi
+      - name: 🚀 Dispatch the pipeline now
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run daily_walkthrough_short.yml \
+            --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
+            -f game=${{ inputs.game || 'auto' }} -f from_timer=true
+
   daily_walkthrough_short:
     name: 🎮 24h Autonomous Cutscene Clipper
+    needs: preflight_gate
+    if: needs.preflight_gate.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -61,27 +131,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: 🚪 Layer 0: 24-Hour Spacing Pre-flight Gate
-        id: gate
-        env:
-          FORCE_RUN: ${{ inputs.force_run }}
-        run: |
-          set -uo pipefail
-          if [ "$FORCE_RUN" = "true" ]; then
-            echo "⚡ Force run requested: Bypassing 24h pre-flight gate."
-            echo "gate_passed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          python3 core/preflight_gate.py
-
       - name: 📦 Install FFmpeg, Fonts & System Dependencies
-        if: steps.gate.outputs.gate_passed == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg libass-dev fonts-montserrat fonts-dejavu-core
 
       - name: 📦 Install Python & Node Dependencies
-        if: steps.gate.outputs.gate_passed == 'true'
         run: |
           python3 -m pip install --upgrade pip
           pip install -U yt-dlp yt-dlp-ejs bgutil-ytdlp-pot-provider
@@ -89,7 +144,6 @@ jobs:
           sudo npm install -g youtube-po-token-generator 2>/dev/null || npm install -g youtube-po-token-generator || true
 
       - name: 🔍 Verify bgutil PO Token Service Health
-        if: steps.gate.outputs.gate_passed == 'true'
         run: |
           echo "Checking bgutil PO token service on port 4416..."
           for i in 1 2 3 4 5; do
@@ -101,7 +155,6 @@ jobs:
           done
 
       - name: 🛡️ Generate YouTube PO Token via Node.js
-        if: steps.gate.outputs.gate_passed == 'true'
         id: pot_gen
         run: |
           set -uo pipefail
@@ -125,7 +178,6 @@ jobs:
           fi
 
       - name: 🍪 Decode YouTube Cookies
-        if: steps.gate.outputs.gate_passed == 'true'
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
@@ -142,8 +194,7 @@ jobs:
               print('ℹ️ No YOUTUBE_COOKIES secret configured. Will attempt download via public client.')
           "
 
-      - name: 🎬 Autonomous Cutscene Crawl, AniDoc Question & Square Render
-        if: steps.gate.outputs.gate_passed == 'true'
+      - name: 🎬 Autonomous Cutscene Crawl, AniDoc Question & Letterbox Render
         env:
           INPUT_GAME: ${{ inputs.game }}
           FORCE_RUN: ${{ inputs.force_run }}
@@ -181,23 +232,23 @@ jobs:
             "${POT_ARGS[@]}"
 
       - name: 📝 Commit Upload & Question History Back to Repository
-        if: steps.gate.outputs.gate_passed == 'true' && always()
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add upload_history.json question_history.json 2>/dev/null || true
+          git add upload_history.json question_history.json candle_gate_state.json 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "No history changes to commit."
           else
-            git commit -m "chore(history): update upload and question history [skip ci]"
+            git commit -m "chore(history): update upload, question, and candle gate history [skip ci]"
             git push origin HEAD:${{ github.ref }} || echo "Push skipped or already up to date."
           fi
 
-      - name: 📦 Upload Generated 1:1 Square Short Artifact
-        if: steps.gate.outputs.gate_passed == 'true' && always()
+      - name: 📦 Upload Generated Letterbox Short Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-gameplay-short-square
+          name: daily-gameplay-short-letterbox
           path: output/*.mp4
           retention-days: 14
           if-no-files-found: ignore

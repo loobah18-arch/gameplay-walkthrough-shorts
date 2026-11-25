@@ -1,81 +1,170 @@
+#!/usr/bin/env python3
 """
-24-Hour Spacing Pre-flight Gate & Algorithm Safety Layer.
-Prevents YouTube spam detection by strictly enforcing >= 24.0 hours between uploads.
+24-Hour Spacing Pre-flight Gate (Layer 0 front-runner for the Hypit pipeline).
+
+Reuses candle_gate.CandleGate.evaluate_upload_spacing() so the workflow can
+skip the entire expensive pipeline (tests, TTS, PO token, 5-tier download,
+render) when fewer than 24 hours have elapsed since the last successful
+YouTube upload — instead of discovering that at the upload step.
+
+Decision matrix (fail-open by design, mirroring candle_gate.py):
+  - no history / no valid entries / parse error  -> proceed (fail-open)
+  - elapsed >= 24h                               -> proceed
+  - remaining <= 30 min                          -> inline sleep, then proceed
+  - otherwise                                    -> skip pipeline (proceed=false)
+
+Manual workflow_dispatch runs set PREFLIGHT_BYPASS to always proceed.
+Exit code is always 0; the decision is carried via the `proceed` GitHub
+Actions output so downstream `if:` conditions stay simple.
 """
+
 import json
 import os
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Any, List
 
-from config.settings import ROOT_DIR
+try:
+    from core.candle_gate import CandleGate
+except ImportError:
+    from candle_gate import CandleGate
 
-UPLOAD_HISTORY_PATH = os.path.join(ROOT_DIR, "upload_history.json")
-MIN_SPACING_HOURS = 24.0
+DEFAULT_HISTORY = Path(__file__).resolve().parent.parent / "upload_history.json"
+DEFAULT_MIN_SPACING_HOURS = 24.0
+DEFAULT_MAX_INLINE_WAIT_HOURS = 0.5
+HARD_SLEEP_CAP_SECONDS = 1900  # defensive: below the preflight job's 45-min timeout
 
 
-def parse_timestamp(iso_str: str) -> datetime:
-    """Parses ISO timestamp string to UTC datetime."""
+def _parse_timestamp(raw: str) -> datetime:
+    ts = raw.strip()
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    dt = datetime.fromisoformat(ts)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _last_valid_upload(records):
+    """Latest entry representing a real successful upload. Skips dry-run ids,
+    non-uploaded statuses, and entries without a usable timestamp (fail-open
+    direction: a stricter filter errs toward re-running, and the upload step's
+    candle gate still enforces Layer 0 anyway)."""
+    for rec in reversed(records if isinstance(records, list) else []):
+        if not isinstance(rec, dict):
+            continue
+        vid = str(rec.get("video_id") or rec.get("youtube_id") or "")
+        if not vid or vid.startswith("dry_run"):
+            # If not yet published to YouTube, still honor spacing if published flag is true or status is published
+            if not rec.get("published", False) and rec.get("status") not in {"uploaded", "published"}:
+                continue
+        elif rec.get("status") not in {"uploaded", "published"} and not rec.get("published", False):
+            continue
+        raw_ts = rec.get("timestamp")
+        if not raw_ts or not isinstance(raw_ts, str):
+            continue
+        return rec, raw_ts
+    return None, None
+
+
+def check_preflight_gate(history_file=DEFAULT_HISTORY, min_hours: float = DEFAULT_MIN_SPACING_HOURS) -> bool:
+    """Convenience wrapper returning boolean for callers like cli.py."""
+    res = decide(history_path=history_file, min_spacing_hours=min_hours)
+    return bool(res.get("proceed", True))
+
+
+def decide(
+    history_path=DEFAULT_HISTORY,
+    now=None,
+    min_spacing_hours: float = DEFAULT_MIN_SPACING_HOURS,
+    max_inline_wait_hours: float = DEFAULT_MAX_INLINE_WAIT_HOURS,
+) -> dict:
+    """Pure decision function (no sleeping, no side effects) for testability."""
+    now = now or datetime.now(timezone.utc)
+
     try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return datetime.fromtimestamp(0, tz=timezone.utc)
+        history = Path(history_path)
+        records = json.loads(history.read_text(encoding="utf-8")) if history.exists() else []
+    except Exception as exc:
+        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
+                "last_video_id": None, "reason": f"fail-open: unreadable history ({exc})"}
 
-
-def check_preflight_gate(history_file: str = UPLOAD_HISTORY_PATH, min_hours: float = MIN_SPACING_HOURS) -> bool:
-    """
-    Checks if >= 24.0 hours have elapsed since the last upload.
-    Returns True if gate passes, False if in cooldown.
-    """
-    if not os.path.isfile(history_file):
-        print(f"✅ Pre-flight Gate PASSED: No previous upload history found at {history_file}.")
-        return True
+    rec, raw_ts = _last_valid_upload(records)
+    if rec is None:
+        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
+                "last_video_id": None, "reason": "no prior successful upload found; pipeline cleared"}
 
     try:
-        with open(history_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            entries = data if isinstance(data, list) else data.get("entries", [])
-    except Exception as e:
-        print(f"⚠️ Warning: Could not parse {history_file} ({e}). Allowing run.")
-        return True
+        published_at = _parse_timestamp(raw_ts)
+    except Exception as exc:
+        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
+                "last_video_id": rec.get("video_id"),
+                "reason": f"fail-open: unparseable timestamp {raw_ts!r} ({exc})"}
 
-    if not entries:
-        print("✅ Pre-flight Gate PASSED: History is empty. Ready for initial upload.")
-        return True
+    elapsed_hours = max((now - published_at).total_seconds() / 3600.0, 0.0)
+    spacing = CandleGate().evaluate_upload_spacing(
+        elapsed_hours, min_spacing_hours, max_inline_wait_hours
+    )
 
-    # Find the most recent entry with a valid timestamp
-    recent_entry = None
-    for entry in reversed(entries):
-        if entry.get("timestamp"):
-            recent_entry = entry
-            break
+    base = {"elapsed_hours": round(elapsed_hours, 2), "last_video_id": rec.get("video_id")}
+    if spacing["can_upload"]:
+        return {**base, "proceed": True, "sleep_seconds": 0, "reason": spacing["recommendation"]}
+    if spacing["requires_spacing_sleep"]:
+        return {**base, "proceed": True,
+                "sleep_seconds": min(spacing["spacing_sleep_seconds"], HARD_SLEEP_CAP_SECONDS),
+                "reason": spacing["recommendation"]}
+    remaining = max(int(round((min_spacing_hours - elapsed_hours) * 3600)), 0)
+    due_at = published_at + timedelta(hours=min_spacing_hours)
+    return {**base, "proceed": False, "sleep_seconds": 0, "remaining_seconds": remaining,
+            "due_at": due_at.strftime("%Y-%m-%dT%H:%M:%SZ"), "reason": spacing["recommendation"]}
 
-    if not recent_entry:
-        print("✅ Pre-flight Gate PASSED: No timestamped prior runs.")
-        return True
 
-    last_time = parse_timestamp(recent_entry["timestamp"])
-    now = datetime.now(timezone.utc)
-    elapsed = (now - last_time).total_seconds() / 3600.0
+def main() -> int:
+    bypass = (
+        os.environ.get("PREFLIGHT_BYPASS", "").strip().lower() in {"1", "true", "yes"}
+        or "--bypass" in sys.argv
+    )
 
-    print(f"🕒 Last upload: {recent_entry.get('title', 'Unknown')} at {recent_entry['timestamp']}")
-    print(f"⏳ Time elapsed: {elapsed:.2f} hours (Required spacing: {min_hours:.1f} hours)")
+    if bypass:
+        result = {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
+                  "last_video_id": None,
+                  "reason": "PREFLIGHT_BYPASS set (manual dispatch) — spacing gate bypassed"}
+    else:
+        try:
+            result = decide()
+        except Exception as exc:  # belt-and-braces fail-open
+            result = {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
+                      "last_video_id": None, "reason": f"fail-open: unexpected gate error ({exc})"}
 
-    if elapsed < min_hours:
-        remaining = min_hours - elapsed
-        print(f"⏸️ Pre-flight Gate CLOSED: Cooldown active ({remaining:.2f} hours remaining). Skipping pipeline.")
-        return False
+    if result["proceed"] and result["sleep_seconds"] > 0:
+        print(f"⏱️ Inline spacing sleep: {result['sleep_seconds'] // 60}m "
+              f"{result['sleep_seconds'] % 60}s (within "
+              f"{DEFAULT_MAX_INLINE_WAIT_HOURS * 60:.0f}-min inline window)")
+        time.sleep(result["sleep_seconds"])
 
-    print("✅ Pre-flight Gate PASSED: >= 24.0 hours elapsed. Algorithmic pacing safe.")
-    return True
+    icon = "✅ PROCEED" if result["proceed"] else "🛑 SKIP"
+    print(f"{icon} | elapsed={result['elapsed_hours']}h | last_upload={result['last_video_id']}")
+    if not result["proceed"] and result.get("due_at"):
+        print(f"⏰ Next upload due at {result['due_at']} ({result['remaining_seconds']}s from now)")
+    print(result["reason"])
+
+    out_file = os.environ.get("GITHUB_OUTPUT")
+    if out_file:
+        with open(out_file, "a", encoding="utf-8") as f:
+            f.write(f"proceed={'true' if result['proceed'] else 'false'}\n")
+            f.write(f"sleep_seconds={result['sleep_seconds']}\n")
+            f.write(f"remaining_seconds={result.get('remaining_seconds', 0)}\n")
+            f.write(f"due_at={result.get('due_at', '')}\n")
+
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(f"### 🕯️ 24-Hour Spacing Pre-flight\n\n"
+                    f"{icon} — elapsed **{result['elapsed_hours']}h** since last upload "
+                    f"(`{result['last_video_id']}`)\n\n> {result['reason']}\n")
+    return 0
 
 
 if __name__ == "__main__":
-    passed = check_preflight_gate()
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output and os.path.isfile(github_output):
-        with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"gate_passed={'true' if passed else 'false'}\n")
-    sys.exit(0 if passed else 1)
+    sys.exit(main())

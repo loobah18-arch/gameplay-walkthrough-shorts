@@ -1,0 +1,25 @@
+{
+  "candle_evaluation": {
+    "decision": "UPLOAD_CLEARED",
+    "can_upload": true,
+    "consecutive_hours_below": 24,
+    "required_hours": 24,
+    "threshold": 2500,
+    "current_hourly_rate": 0,
+    "peak_hourly_rate": 0,
+    "total_candles": 0,
+    "recommendation": "Initial state cleared for daily uploads."
+  },
+  "engagement_metrics": {
+    "swipe_through_rate": 80.0,
+    "str_pass": true,
+    "str_target": 80.0,
+    "average_view_duration_seconds": 48.0,
+    "video_duration_seconds": 60.0,
+    "avd_percent": 80.0,
+    "avd_pass": true,
+    "avd_target_percent": 80.0,
+    "viral_benchmark_met": true,
+    "status": "INITIAL_CLEARED"
+  }
+}
