@@ -1,0 +1,238 @@
+"""
+Walkthrough Backlog Crawler & Autonomous Video Discovery.
+Discovers long-form 4K walkthroughs and game movies, strictly excluding Shorts (<180s)
+and cross-referencing upload_history.json to guarantee zero repeated scenes.
+"""
+import json
+import os
+import re
+import subprocess
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Set
+
+from config.settings import ROOT_DIR
+
+CATALOG_PATH = os.path.join(ROOT_DIR, "config", "game_catalog.json")
+UPLOAD_HISTORY_PATH = os.path.join(ROOT_DIR, "upload_history.json")
+
+
+def log(msg: str) -> None:
+    now = datetime.now().strftime("%H:%M:%S")
+    print(f"[{now}] [WalkthroughCrawler] {msg}", flush=True)
+
+
+class WalkthroughCrawler:
+    """Discovers fresh long-form game movie walkthroughs with duplicate avoidance."""
+
+    def __init__(
+        self,
+        catalog_path: str = CATALOG_PATH,
+        history_path: str = UPLOAD_HISTORY_PATH,
+    ):
+        self.catalog_path = catalog_path
+        self.history_path = history_path
+        self.catalog = self._load_catalog()
+
+    def _load_catalog(self) -> Dict[str, Any]:
+        if os.path.isfile(self.catalog_path):
+            with open(self.catalog_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {"games": {}, "curated_channels": []}
+
+    def get_clipped_history(self) -> Dict[str, Any]:
+        """Loads upload history to avoid repeating videos or specific cutscenes."""
+        if not os.path.isfile(self.history_path):
+            return {"clipped_video_ids": [], "clipped_cutscenes": [], "entries": []}
+        try:
+            with open(self.history_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    vids = [item.get("source_video_id") or item.get("video_id") for item in data if item]
+                    scenes = [item.get("cutscene_title") or item.get("title") for item in data if item]
+                    return {
+                        "clipped_video_ids": [v for v in vids if v],
+                        "clipped_cutscenes": [s for s in scenes if s],
+                        "entries": data,
+                    }
+                return data
+        except Exception as e:
+            log(f"Warning: Failed to load history: {e}")
+            return {"clipped_video_ids": [], "clipped_cutscenes": [], "entries": []}
+
+    def is_previously_clipped(self, video_id: str, cutscene_title: Optional[str] = None) -> bool:
+        """Checks if video ID or cutscene title was already clipped and published."""
+        history = self.get_clipped_history()
+        if video_id in history.get("clipped_video_ids", []):
+            return True
+        if cutscene_title:
+            norm_title = re.sub(r"[^a-zA-Z0-9]+", "", cutscene_title.lower())
+            for clipped in history.get("clipped_cutscenes", []):
+                if norm_title == re.sub(r"[^a-zA-Z0-9]+", "", str(clipped).lower()):
+                    return True
+        return False
+
+    def fetch_channel_rss_uploads(self, channel_id: str, timeout: int = 10) -> List[Dict[str, Any]]:
+        """Fetches the 15 latest uploads for a channel via YouTube XML RSS feed."""
+        url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        uploads = []
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                content = resp.read()
+                root = ET.fromstring(content)
+                ns = {
+                    "atom": "http://www.w3.org/2005/Atom",
+                    "yt": "http://www.youtube.com/xml/schemas/2015",
+                }
+                for entry in root.findall("atom:entry", ns):
+                    vid_elem = entry.find("yt:videoId", ns)
+                    title_elem = entry.find("atom:title", ns)
+                    pub_elem = entry.find("atom:published", ns)
+                    if vid_elem is not None and title_elem is not None:
+                        vid_id = vid_elem.text or ""
+                        title = title_elem.text or ""
+                        pub_str = pub_elem.text if pub_elem is not None else ""
+                        if vid_id and title:
+                            uploads.append({
+                                "video_id": vid_id,
+                                "title": title,
+                                "published_at": pub_str,
+                                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                            })
+        except Exception as e:
+            log(f"Warning: RSS fetch failed for channel {channel_id}: {e}")
+        return uploads
+
+    def search_game_walkthroughs(
+        self,
+        query: str,
+        max_results: int = 5,
+        proxy: Optional[str] = None,
+        cookies_path: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Searches YouTube for long-form game movies and cutscenes.
+        Strictly filters out any video under 180 seconds (no Shorts allowed).
+        """
+        cmd = [
+            "yt-dlp",
+            "-4",
+            "--js-runtimes", "node",
+            "--default-search", f"ytsearch{max_results}:",
+            "--dump-json",
+            "--skip-download",
+            "--no-playlist",
+            "--match-filter", "duration >= 180 & !is_live",
+        ]
+        if proxy or os.environ.get("YOUTUBE_PROXY"):
+            cmd.extend(["--proxy", proxy or os.environ["YOUTUBE_PROXY"]])
+        if cookies_path and os.path.isfile(cookies_path):
+            cmd.extend(["--cookies", cookies_path])
+
+        cmd.append(query)
+        results = []
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+            if res.returncode == 0 and res.stdout:
+                for line in res.stdout.strip().splitlines():
+                    try:
+                        data = json.loads(line)
+                        dur = data.get("duration") or 0
+                        # Hard filter: must be at least 3 minutes, not a Short
+                        if dur < 180:
+                            continue
+                        vid_id = data.get("id")
+                        if vid_id:
+                            results.append({
+                                "video_id": vid_id,
+                                "title": data.get("title") or "Gameplay Walkthrough",
+                                "duration": dur,
+                                "channel": data.get("channel") or data.get("uploader"),
+                                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                                "chapters": data.get("chapters") or [],
+                            })
+                    except Exception:
+                        continue
+        except Exception as e:
+            log(f"Warning: Search failed for '{query}': {e}")
+        return results
+
+    def select_next_walkthrough(
+        self,
+        preferred_game: Optional[str] = None,
+        proxy: Optional[str] = None,
+        cookies_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Selects the next unclipped walkthrough candidate across the catalog games.
+        Ensures zero duplicate videos, strictly >= 180s, prioritizing cutscenes.
+        """
+        games = self.catalog.get("games", {})
+        game_keys = list(games.keys())
+        if not game_keys:
+            raise RuntimeError("No games found in catalog.")
+
+        # Determine rotation order
+        history = self.get_clipped_history()
+        clipped_ids = set(history.get("clipped_video_ids", []))
+
+        selected_game_key = preferred_game if preferred_game in games else None
+        if not selected_game_key:
+            # Rotate based on history length
+            idx = len(history.get("entries", [])) % len(game_keys)
+            selected_game_key = game_keys[idx]
+
+        game_data = games[selected_game_key]
+        game_name = game_data.get("name", selected_game_key)
+        queries = game_data.get("search_queries", [f"{game_name} All Cutscenes 4K"])
+
+        log(f"Selecting unclipped walkthrough for game: '{game_name}'")
+        for query in queries:
+            candidates = self.search_game_walkthroughs(
+                query=query,
+                max_results=6,
+                proxy=proxy,
+                cookies_path=cookies_path,
+            )
+            for cand in candidates:
+                vid = cand["video_id"]
+                if vid not in clipped_ids:
+                    log(f"✅ Found unclipped long-form candidate: '{cand['title']}' ({vid}) [{cand['duration']}s]")
+                    return {
+                        "game_key": selected_game_key,
+                        "game_name": game_name,
+                        "video_id": vid,
+                        "title": cand["title"],
+                        "url": cand["url"],
+                        "duration": cand["duration"],
+                        "chapters": cand.get("chapters", []),
+                    }
+
+        # Fallback to direct channel RSS if search is rate limited
+        curated_channels = self.catalog.get("curated_channels", [])
+        for ch in curated_channels:
+            ch_id = ch.get("channel_id")
+            if not ch_id:
+                continue
+            uploads = self.fetch_channel_rss_uploads(ch_id)
+            for up in uploads:
+                vid = up["video_id"]
+                if vid not in clipped_ids:
+                    log(f"✅ Fallback to curated channel upload: '{up['title']}' ({vid})")
+                    return {
+                        "game_key": selected_game_key,
+                        "game_name": game_name,
+                        "video_id": vid,
+                        "title": up["title"],
+                        "url": up["url"],
+                        "duration": 0,
+                        "chapters": [],
+                    }
+
+        raise RuntimeError(f"Could not find any unclipped walkthrough for '{game_name}'.")

@@ -176,111 +176,147 @@ class VideoRenderer:
                 print(res.stdout)
             return res.returncode == 0 and cls.check_file_exists(output_filepath)
 
-        # Tier 1: Apple VisionOS client (NO cookies)
-        print("🔄 [Tier 1] Trying VisionOS client (1080p pristine, no cookies)...")
-        cmd1 = cls.build_ytdlp_download_cmd(
-            video_url=video_url,
-            start_time=start_time,
-            end_time=end_time,
-            output_filepath=output_filepath,
-            cookies_path=None,
-            proxy=proxy,
-            client_override="visionos",
-            use_cookies=False,
-            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
-            use_download_sections=True,
-        )
-        if run_ytdlp(cmd1):
-            found = cls.find_existing_media_file(output_filepath)
-            if found:
-                print(f"✅ [Tier 1] VisionOS 1080p section download succeeded: {found}")
-                return found
+        # Tier 1: Residential Proxy Routing (if configured)
+        p = proxy or os.environ.get("YOUTUBE_PROXY")
+        if p:
+            print("🌐 [Tier 1] Attempting download via YOUTUBE_PROXY (residential IP)...")
+            cmd1 = cls.build_ytdlp_download_cmd(
+                video_url=video_url,
+                start_time=start_time,
+                end_time=end_time,
+                output_filepath=output_filepath,
+                cookies_path=cookies_path,
+                proxy=p,
+                client_override="web,mweb",
+                use_cookies=True,
+                po_token=po_token,
+                visitor_data=visitor_data,
+                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
+                use_download_sections=True,
+            )
+            if run_ytdlp(cmd1):
+                found = cls.find_existing_media_file(output_filepath)
+                if found:
+                    print(f"✅ [Tier 1] Successfully downloaded clip via Proxy: {found}")
+                    return found
 
-        # Tier 2: Android client (NO cookies)
-        print("🔄 [Tier 2] Trying Android client (no cookies)...")
-        cmd2 = cls.build_ytdlp_download_cmd(
-            video_url=video_url,
-            start_time=start_time,
-            end_time=end_time,
-            output_filepath=output_filepath,
-            cookies_path=None,
-            proxy=proxy,
-            client_override="android,android_vr",
-            use_cookies=False,
-            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=720]/18/b",
-            use_download_sections=True,
-        )
-        if run_ytdlp(cmd2):
-            found = cls.find_existing_media_file(output_filepath)
-            if found:
-                print(f"✅ [Tier 2] Android client section download succeeded: {found}")
-                return found
-
-        # Tier 3: Cookies with PO token across web_safari, mweb, web (HLS + DASH bypass)
+        # Tier 2: PO Token + bgutil Docker service (web,mweb with cookies)
+        # Uses local bgutil container on :4416 if healthy to generate fresh gvs PO tokens
         if cookies_path and os.path.isfile(cookies_path):
-            print("🔄 [Tier 3] Trying section download with cookies + PO Token (web_safari,mweb,web)...")
-            cmd3 = cls.build_ytdlp_download_cmd(
+            print("🎟️ [Tier 2] Trying PO Token + cookies with bgutil service (web,mweb)...")
+            cmd2 = cls.build_ytdlp_download_cmd(
                 video_url=video_url,
                 start_time=start_time,
                 end_time=end_time,
                 output_filepath=output_filepath,
                 cookies_path=cookies_path,
                 proxy=proxy,
-                client_override="web_safari,mweb,web",
+                client_override="web,mweb",
                 use_cookies=True,
                 po_token=po_token,
                 visitor_data=visitor_data,
-                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/96/95/22/18/b",
+                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
+                use_download_sections=True,
+            )
+            if run_ytdlp(cmd2):
+                found = cls.find_existing_media_file(output_filepath)
+                if found:
+                    print(f"✅ [Tier 2] PO Token section download succeeded: {found}")
+                    return found
+
+            # Tier 2b: Native full-file download with web/mweb (no --download-sections)
+            # Avoids FFmpeg HTTP range 403 Forbidden errors
+            print("🛡️ [Tier 2b] Trying native full-file download with PO token (web,mweb)...")
+            temp_full2 = os.path.join(
+                os.path.dirname(os.path.abspath(output_filepath)),
+                f"full_src_pot_{uuid.uuid4().hex[:8]}.mp4",
+            )
+            cmd2b = cls.build_ytdlp_download_cmd(
+                video_url=video_url,
+                start_time=None,
+                end_time=None,
+                output_filepath=temp_full2,
+                cookies_path=cookies_path,
+                proxy=proxy,
+                client_override="web,mweb",
+                use_cookies=True,
+                po_token=po_token,
+                visitor_data=visitor_data,
+                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
+                use_download_sections=False,
+            )
+            print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd2b)}")
+            res2b = subprocess.run(cmd2b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if res2b.stdout:
+                print(res2b.stdout)
+            actual_full2 = cls.find_existing_media_file(temp_full2)
+            try:
+                if actual_full2 and os.path.isfile(actual_full2):
+                    print(f"✂️ Cutting section {start_time}s to {end_time}s via frame-accurate ffmpeg...")
+                    cut_cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(start_time),
+                        "-to", str(end_time),
+                        "-i", actual_full2,
+                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                        "-c:a", "aac", "-b:a", "192k",
+                        output_filepath,
+                    ]
+                    subprocess.run(cut_cmd, check=True)
+                    found = cls.find_existing_media_file(output_filepath)
+                    if found:
+                        print(f"✅ [Tier 2b] Successfully extracted clip from PO Token full download: {found}")
+                        return found
+            finally:
+                if actual_full2 and os.path.isfile(actual_full2):
+                    try:
+                        os.remove(actual_full2)
+                    except OSError:
+                        pass
+
+        # Tier 3: Apple VisionOS / iOS HLS client (NO cookies)
+        print("🍎 [Tier 3] Trying Apple VisionOS / iOS HLS client (no cookies)...")
+        for client in ["visionos", "ios", "android_vr"]:
+            cmd3 = cls.build_ytdlp_download_cmd(
+                video_url=video_url,
+                start_time=start_time,
+                end_time=end_time,
+                output_filepath=output_filepath,
+                cookies_path=None,
+                proxy=proxy,
+                client_override=client,
+                use_cookies=False,
+                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
                 use_download_sections=True,
             )
             if run_ytdlp(cmd3):
                 found = cls.find_existing_media_file(output_filepath)
                 if found:
-                    print(f"✅ [Tier 3] Authenticated section download succeeded: {found}")
+                    print(f"✅ [Tier 3] Apple/Mobile client section download succeeded ({client}): {found}")
                     return found
 
-        # Tier 4: iOS / TV client fallback without cookies
-        print("🔄 [Tier 4] Falling back to iOS/TV client without cookies...")
-        cmd4 = cls.build_ytdlp_download_cmd(
-            video_url=video_url,
-            start_time=start_time,
-            end_time=end_time,
-            output_filepath=output_filepath,
-            cookies_path=None,
-            proxy=proxy,
-            client_override="ios,tv",
-            use_cookies=False,
-            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
-            use_download_sections=True,
-        )
-        if run_ytdlp(cmd4):
-            found = cls.find_existing_media_file(output_filepath)
-            if found:
-                print(f"✅ [Tier 4] iOS/TV client section download succeeded: {found}")
-                return found
-
-        # Tier 5: Full-file progressive native download + frame-accurate ffmpeg cut
-        print("🔄 [Tier 5] Fallback: Full-file progressive native download + frame-accurate ffmpeg cut...")
+        # Tier 4: CDN 403 Bypass (720p / progressive format 22 / 18 / b)
+        print("🛡️ [Tier 4] Fallback: Progressive 720p/360p native download to bypass CDN 403...")
         temp_full = os.path.join(
             os.path.dirname(os.path.abspath(output_filepath)),
             f"full_source_{uuid.uuid4().hex[:8]}.mp4",
         )
-        cmd5 = cls.build_ytdlp_download_cmd(
+        cmd4 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
             start_time=None,
             end_time=None,
             output_filepath=temp_full,
             cookies_path=cookies_path if (cookies_path and os.path.isfile(cookies_path)) else None,
             proxy=proxy,
-            client_override="visionos,android",
-            use_cookies=False,
-            format_spec="18/best[height<=720]/b",
+            client_override="web,mweb,android",
+            use_cookies=bool(cookies_path and os.path.isfile(cookies_path)),
+            format_spec="22/18/best[height<=720]/b",
             use_download_sections=False,
         )
-        print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd5)}")
-        res5 = subprocess.run(cmd5, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        if res5.stdout:
-            print(res5.stdout)
+        print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd4)}")
+        res4 = subprocess.run(cmd4, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if res4.stdout:
+            print(res4.stdout)
 
         actual_full = cls.find_existing_media_file(temp_full)
         try:
@@ -298,7 +334,7 @@ class VideoRenderer:
                 subprocess.run(cut_cmd, check=True)
                 found = cls.find_existing_media_file(output_filepath)
                 if found:
-                    print(f"✅ [Tier 5] Successfully extracted clip from full download: {found}")
+                    print(f"✅ [Tier 4] Successfully extracted clip from progressive download: {found}")
                     return found
         finally:
             if actual_full and os.path.isfile(actual_full):

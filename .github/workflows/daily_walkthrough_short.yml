@@ -1,0 +1,203 @@
+name: ⏰ 24-Hour Daily Walkthrough Cutscene Shorts Pipeline
+
+on:
+  schedule:
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC).
+    # The preflight_gate step strictly enforces that >= 24h have elapsed since
+    # the last upload in upload_history.json before triggering heavy download and rendering.
+    - cron: '0 0,6,12,18 * * *'
+
+  workflow_dispatch:
+    inputs:
+      game:
+        description: 'Target Game (auto = rotate catalog, or detroit_become_human, gta_v, red_dead_redemption_2, god_of_war_ragnarok, cyberpunk_2077, the_last_of_us)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - 'detroit_become_human'
+          - 'gta_v'
+          - 'red_dead_redemption_2'
+          - 'god_of_war_ragnarok'
+          - 'cyberpunk_2077'
+          - 'the_last_of_us'
+      force_run:
+        description: 'Bypass 24-hour pre-flight spacing gate'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: daily-walkthrough-short-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  daily_walkthrough_short:
+    name: 🎮 24h Autonomous Cutscene Clipper
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      # PO Token Provider to bypass YouTube bot detection on Azure runners
+      bgutil-provider:
+        image: brainicism/bgutil-ytdlp-pot-provider:latest
+        ports:
+          - 4416:4416
+
+    steps:
+      - name: 📥 Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 🚪 Layer 0: 24-Hour Spacing Pre-flight Gate
+        id: gate
+        env:
+          FORCE_RUN: ${{ inputs.force_run }}
+        run: |
+          set -uo pipefail
+          if [ "$FORCE_RUN" = "true" ]; then
+            echo "⚡ Force run requested: Bypassing 24h pre-flight gate."
+            echo "gate_passed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 core/preflight_gate.py
+
+      - name: 📦 Install FFmpeg, Fonts & System Dependencies
+        if: steps.gate.outputs.gate_passed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libass-dev fonts-montserrat fonts-dejavu-core
+
+      - name: 📦 Install Python & Node Dependencies
+        if: steps.gate.outputs.gate_passed == 'true'
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -U yt-dlp yt-dlp-ejs bgutil-ytdlp-pot-provider
+          pip install -r requirements.txt
+          sudo npm install -g youtube-po-token-generator 2>/dev/null || npm install -g youtube-po-token-generator || true
+
+      - name: 🔍 Verify bgutil PO Token Service Health
+        if: steps.gate.outputs.gate_passed == 'true'
+        run: |
+          echo "Checking bgutil PO token service on port 4416..."
+          for i in 1 2 3 4 5; do
+            if curl -sf http://127.0.0.1:4416/ping 2>/dev/null; then
+              echo "✅ bgutil PO token provider is healthy on port 4416"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: 🛡️ Generate YouTube PO Token via Node.js
+        if: steps.gate.outputs.gate_passed == 'true'
+        id: pot_gen
+        run: |
+          set -uo pipefail
+          GLOBAL_NODE_ROOT="$(npm root -g 2>/dev/null || true)"
+          POT_JSON=$(NODE_PATH="$GLOBAL_NODE_ROOT" timeout 30 node -e "
+            const { generate } = require('youtube-po-token-generator');
+            generate().then(r => { console.log(JSON.stringify(r)); }).catch(e => { console.log('{}'); });
+          " 2>/dev/null || echo '{}')
+
+          PO_TOKEN=$(echo "$POT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('poToken',''))" 2>/dev/null || echo "")
+          VISITOR_DATA=$(echo "$POT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('visitorData',''))" 2>/dev/null || echo "")
+
+          if [ -n "$PO_TOKEN" ] && [ -n "$VISITOR_DATA" ]; then
+            echo "✅ PO Token generated successfully"
+            echo "po_token=$PO_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "visitor_data=$VISITOR_DATA" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ PO Token empty; relying on local bgutil container service on port 4416"
+            echo "po_token=" >> "$GITHUB_OUTPUT"
+            echo "visitor_data=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 🍪 Decode YouTube Cookies
+        if: steps.gate.outputs.gate_passed == 'true'
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import os
+          from core.cookie_manager import CookieManager
+          raw = os.environ.get('YOUTUBE_COOKIES', '').strip()
+          if raw:
+              CookieManager.export_cookie_file(raw, 'youtube_cookies.txt')
+              info = CookieManager.validate_cookies_content(CookieManager.decode_cookie_data(raw))
+              print(f'🍪 Exported youtube_cookies.txt (valid={info[\"valid\"]}, expired={info[\"expired_count\"]})')
+          else:
+              print('ℹ️ No YOUTUBE_COOKIES secret configured. Will attempt download via public client.')
+          "
+
+      - name: 🎬 Autonomous Cutscene Crawl, AniDoc Question & Square Render
+        if: steps.gate.outputs.gate_passed == 'true'
+        env:
+          INPUT_GAME: ${{ inputs.game }}
+          FORCE_RUN: ${{ inputs.force_run }}
+          YOUTUBE_PROXY: ${{ secrets.YOUTUBE_PROXY }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YT_PO_TOKEN: ${{ steps.pot_gen.outputs.po_token }}
+          YT_VISITOR_DATA: ${{ steps.pot_gen.outputs.visitor_data }}
+        run: |
+          set -euo pipefail
+          COOKIE_ARGS=()
+          if [ -f youtube_cookies.txt ]; then
+            COOKIE_ARGS=(--cookies youtube_cookies.txt)
+          fi
+
+          POT_ARGS=()
+          if [ -n "$YT_PO_TOKEN" ]; then
+            POT_ARGS=(--po-token "$YT_PO_TOKEN" --visitor-data "$YT_VISITOR_DATA")
+          fi
+
+          GAME_ARG=()
+          if [ -n "$INPUT_GAME" ] && [ "$INPUT_GAME" != "auto" ]; then
+            GAME_ARG=(--game "$INPUT_GAME")
+          fi
+
+          FORCE_ARG=()
+          if [ "$FORCE_RUN" = "true" ]; then
+            FORCE_ARG=(--force)
+          fi
+
+          python3 cli.py daily-job \
+            "${GAME_ARG[@]}" \
+            "${FORCE_ARG[@]}" \
+            "${COOKIE_ARGS[@]}" \
+            "${POT_ARGS[@]}"
+
+      - name: 📝 Commit Upload & Question History Back to Repository
+        if: steps.gate.outputs.gate_passed == 'true' && always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add upload_history.json question_history.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "No history changes to commit."
+          else
+            git commit -m "chore(history): update upload and question history [skip ci]"
+            git push origin HEAD:${{ github.ref }} || echo "Push skipped or already up to date."
+          fi
+
+      - name: 📦 Upload Generated 1:1 Square Short Artifact
+        if: steps.gate.outputs.gate_passed == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-gameplay-short-square
+          path: output/*.mp4
+          retention-days: 14
+          if-no-files-found: ignore

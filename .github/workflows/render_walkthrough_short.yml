@@ -30,9 +30,13 @@ on:
         required: false
         default: 'Epic Cutscene Moment'
       game_name:
-        description: 'Game Name (e.g., Detroit: Become Human, GTA 6)'
+        description: 'Game Name (e.g., Detroit: Become Human, GTA 5)'
         required: false
         default: 'Detroit: Become Human'
+      top_question:
+        description: 'Optional AniDoc engaging question hook on top (leave blank to auto-generate)'
+        required: false
+        default: ''
       enable_subtitles:
         description: 'Burn dynamic ASS subtitles'
         required: false
@@ -148,9 +152,12 @@ jobs:
           ASPECT_RATIO: ${{ inputs.aspect_ratio }}
           CLIP_TITLE: ${{ inputs.title }}
           GAME_NAME: ${{ inputs.game_name }}
+          TOP_QUESTION: ${{ inputs.top_question }}
           ENABLE_SUBS: ${{ inputs.enable_subtitles }}
           UPLOAD_TO_YT: ${{ inputs.upload_to_youtube }}
           YOUTUBE_PROXY: ${{ secrets.YOUTUBE_PROXY }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YT_PO_TOKEN: ${{ steps.pot_gen.outputs.po_token }}
           YT_VISITOR_DATA: ${{ steps.pot_gen.outputs.visitor_data }}
         run: |
@@ -170,6 +177,11 @@ jobs:
             POT_ARGS=(--po-token "$YT_PO_TOKEN" --visitor-data "$YT_VISITOR_DATA")
           fi
 
+          TOP_Q_ARG=()
+          if [ -n "$TOP_QUESTION" ]; then
+            TOP_Q_ARG=(--top-question "$TOP_QUESTION")
+          fi
+
           OUT_NAME=$(python3 -c "
           import os, re
           title = os.environ.get('CLIP_TITLE', '').strip()
@@ -184,18 +196,17 @@ jobs:
           fi
 
           echo "🎮 Game: $GAME_NAME | Title: $CLIP_TITLE"
-          if [ "$UPLOAD_TO_YT" = "true" ]; then
-            echo "::warning::upload_to_youtube=true requested, but automatic YouTube upload is not configured in this workflow; producing downloadable artifact only."
-          fi
-
           python3 cli.py render-cloud-job \
             --url "$VIDEO_URL" \
             --start "$START_TIME" \
             --end "$END_TIME" \
             --aspect-ratio "$ASPECT_RATIO" \
+            --game "$GAME_NAME" \
+            --title "$CLIP_TITLE" \
             "${SUBS_FLAG[@]}" \
             "${COOKIE_ARGS[@]}" \
             "${POT_ARGS[@]}" \
+            "${TOP_Q_ARG[@]}" \
             "${OUT_ARGS[@]}"
 
       - name: 📦 Upload Generated Video Artifact

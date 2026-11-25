@@ -18,9 +18,12 @@ from core.cloud_dispatcher import CloudDispatcher
 from core.cookie_manager import CookieManager
 from core.cutscene_analyzer import CutsceneAnalyzer
 from core.payoff_detector import ActualPayoffDetector
+from core.question_manager import QuestionManager
 from core.subtitle_builder import SubtitleBuilder
 from core.video_renderer import VideoRenderer
+from core.walkthrough_crawler import WalkthroughCrawler
 from core.walkthrough_fetcher import WalkthroughFetcher
+from core.youtube_uploader import YouTubeUploader
 
 
 def parse_timestamp_arg(raw: str) -> float:
@@ -360,29 +363,34 @@ def cmd_render_cloud_job(args):
     else:
         print(f"📦 Pre-staged raw video slice detected: {actual_raw}")
 
-    # 2. Extract transcript and generate ASS subtitles if enabled
+    # 2. Extract transcript and generate ASS subtitles with AniDoc top question
+    top_question = getattr(args, "top_question", None)
+    game_name = getattr(args, "game", "Epic Game Cutscene")
+    if not top_question:
+        qm = QuestionManager()
+        game_slug = re.sub(r"[^a-zA-Z0-9]+", "_", game_name.lower())
+        top_question = qm.generate_question(game_key=game_slug, game_name=game_name, cutscene_title=raw_output_name)
+
+    cues_to_burn = []
     if args.enable_subtitles:
         try:
             print("📝 Generating styled ASS subtitles...")
             fetcher = WalkthroughFetcher()
             cues = fetcher.fetch_transcript(video_url, video_id=vid_key, cookies_path=args.cookies, proxy=args.proxy)
-            # Keep any cue overlapping [start_time, end_time] and clamp cleanly inside clip duration
-            clip_cues = [c for c in cues if c["end"] > start_time and c["start"] < end_time]
-            if clip_cues:
-                SubtitleBuilder.generate_ass(
-                    cues=clip_cues,
-                    output_path=ass_path,
-                    aspect_ratio_key=args.aspect_ratio,
-                    time_offset=start_time,
-                    max_duration=clip_duration,
-                )
-                print(f"✅ Generated ASS subtitles at {ass_path}")
-            else:
-                print("ℹ️ No subtitle cues found in this time range; rendering without burned subtitles.")
-                ass_path = None
+            cues_to_burn = [c for c in cues if c["end"] > start_time and c["start"] < end_time]
         except Exception as e:
-            print(f"⚠️ Subtitle generation error ({e}); rendering without burned subtitles.")
-            ass_path = None
+            print(f"⚠️ Subtitle generation error ({e}); rendering without burned dialogue.")
+
+    if cues_to_burn or top_question:
+        SubtitleBuilder.generate_ass(
+            cues=cues_to_burn,
+            output_path=ass_path,
+            aspect_ratio_key=args.aspect_ratio,
+            time_offset=start_time,
+            max_duration=clip_duration,
+            top_question=top_question,
+        )
+        print(f"✅ Generated ASS with top engaging question at {ass_path}")
     else:
         ass_path = None
 
@@ -402,6 +410,112 @@ def cmd_render_cloud_job(args):
         ass_subtitle_path=ass_path,
     )
     print(f"🎉 Short successfully rendered: {final_path}")
+
+    # 5. Persist to upload history and upload if credentials exist
+    uploader = YouTubeUploader()
+    uploader.publish_short(
+        video_path=final_path,
+        title=getattr(args, "title", raw_output_name),
+        game_name=game_name,
+        source_video_id=vid_key,
+        cutscene_title=raw_output_name,
+        top_question=top_question or "",
+        duration=clip_duration,
+    )
+
+
+def cmd_daily_job(args):
+    """Autonomous 24-hour cloud runner entrypoint."""
+    from core.preflight_gate import check_preflight_gate
+    if not check_preflight_gate() and not getattr(args, "force", False):
+        print("⏸️ 24h pre-flight gate not satisfied. Exiting daily job.")
+        sys.exit(0)
+
+    crawler = WalkthroughCrawler()
+    candidate = crawler.select_next_walkthrough(
+        preferred_game=args.game if args.game else None,
+        proxy=args.proxy,
+        cookies_path=args.cookies,
+    )
+
+    vid_url = candidate["url"]
+    game_name = candidate["game_name"]
+    vid_id = candidate["video_id"]
+    print(f"🎯 Selected Walkthrough Candidate: {candidate['title']} ({vid_url})")
+
+    fetcher = WalkthroughFetcher()
+    info = fetcher.fetch_video_info(vid_url, cookies_path=args.cookies, proxy=args.proxy)
+    chapters = info.get("chapters") or candidate.get("chapters") or []
+
+    # 1. Look for chapters with cutscene affinity, strictly excluding gameplay
+    eligible_chapters = []
+    for chap in chapters:
+        c_title = chap.get("title", "")
+        affinity = CutsceneAnalyzer.score_chapter_cutscene_affinity(c_title)
+        if affinity < 0:
+            continue  # Pure gameplay / free roam rejected
+        dur = (chap.get("end_time") or 0) - (chap.get("start_time") or 0)
+        if dur >= 25:
+            eligible_chapters.append((chap, affinity))
+
+    eligible_chapters.sort(key=lambda x: x[1], reverse=True)
+
+    start_sec = 0.0
+    end_sec = 55.0
+    scene_title = candidate["title"]
+
+    if eligible_chapters:
+        best_chap, _ = eligible_chapters[0]
+        window = ActualPayoffDetector.calculate_chapter_payoff_window(
+            chapter_start=best_chap["start_time"],
+            chapter_end=best_chap["end_time"],
+            target_duration=55.0,
+        )
+        start_sec = window["start"]
+        end_sec = window["end"]
+        scene_title = best_chap.get("title", scene_title)
+        print(f"🎬 Selected Cutscene Chapter: '{scene_title}' ({start_sec}s -> {end_sec}s)")
+    else:
+        # Scan transcript for dense character dialogue with decisive payoff
+        cues = fetcher.fetch_transcript(vid_url, video_id=vid_id, cookies_path=args.cookies, proxy=args.proxy)
+        analyzer = CutsceneAnalyzer()
+        segments = analyzer.find_viral_segments(cues, min_duration=25, max_duration=58, require_payoff=True)
+        if segments:
+            best_seg = segments[0]
+            start_sec = best_seg["start"]
+            end_sec = best_seg["end"]
+            scene_title = analyzer.generate_short_title(game_name, best_seg["sample_dialogue"], payoff_phrase=best_seg.get("payoff_line"))
+            print(f"🎬 Selected Dialogue Cutscene Climax: '{scene_title}' ({start_sec}s -> {end_sec}s)")
+        else:
+            print("⚠️ No strict cutscene payoff found. Falling back to default window.")
+            start_sec = 60.0
+            end_sec = 115.0
+
+    # Build AniDoc-style top engaging question
+    qm = QuestionManager()
+    top_question = qm.generate_question(
+        game_key=candidate.get("game_key", "game"),
+        game_name=game_name,
+        cutscene_title=scene_title,
+    )
+    print(f"💡 AniDoc Top Engaging Question: \"{top_question}\"")
+
+    render_args = argparse.Namespace(
+        url=vid_url,
+        start=start_sec,
+        end=end_sec,
+        aspect_ratio="square",
+        enable_subtitles=True,
+        cookies=args.cookies,
+        proxy=args.proxy,
+        po_token=getattr(args, "po_token", None),
+        visitor_data=getattr(args, "visitor_data", None),
+        output=f"{re.sub(r'[^A-Za-z0-9]+', '_', scene_title)[:40]}_square.mp4",
+        top_question=top_question,
+        game=game_name,
+        title=f"{scene_title} | {game_name}",
+    )
+    cmd_render_cloud_job(render_args)
 
 
 def main():
@@ -459,12 +573,25 @@ def main():
     p_cloud.add_argument("--aspect-ratio", default="square", choices=list(ASPECT_RATIOS.keys()))
     p_cloud.add_argument("--enable-subtitles", action="store_true", default=False, help="Burn styled ASS subtitles")
     p_cloud.add_argument("--no-subtitles", dest="enable_subtitles", action="store_false", help="Disable ASS subtitles")
+    p_cloud.add_argument("--top-question", help="AniDoc-style top engaging question header")
+    p_cloud.add_argument("--game", default="Epic Game Cutscene", help="Game Name")
+    p_cloud.add_argument("--title", help="Cutscene Short title")
     p_cloud.add_argument("--cookies", help="Path to cookies.txt")
     p_cloud.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_cloud.add_argument("--po-token", help="YouTube PO Token")
     p_cloud.add_argument("--visitor-data", help="YouTube Visitor Data")
     p_cloud.add_argument("--output", help="Output filename")
     p_cloud.set_defaults(func=cmd_render_cloud_job)
+
+    # daily-job (autonomous 24-hour pipeline)
+    p_daily = subparsers.add_parser("daily-job", help="Autonomous 24-hour walkthrough cutscene clipper")
+    p_daily.add_argument("--game", help="Optional game override (default: auto-rotate catalog)")
+    p_daily.add_argument("--force", action="store_true", help="Bypass 24h pre-flight gate check")
+    p_daily.add_argument("--cookies", help="Path to cookies.txt")
+    p_daily.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
+    p_daily.add_argument("--po-token", help="YouTube PO Token")
+    p_daily.add_argument("--visitor-data", help="YouTube Visitor Data")
+    p_daily.set_defaults(func=cmd_daily_job)
 
     args = parser.parse_args()
     args.func(args)

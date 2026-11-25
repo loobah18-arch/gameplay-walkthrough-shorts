@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "description": "Curated Story Games & High-Quality Walkthrough Channels for Cutscene Shorts",
+  "default_aspect_ratio": "square",
+  "curated_channels": [
+    {
+      "name": "MKIceAndFire",
+      "handle": "@MKIceAndFire",
+      "url": "https://www.youtube.com/@MKIceAndFire/videos",
+      "channel_id": "UC1bwliGv7V5qiQV1v55AGgk"
+    },
+    {
+      "name": "Shirrako",
+      "handle": "@Shirrako",
+      "url": "https://www.youtube.com/@Shirrako/videos",
+      "channel_id": "UC7eAfUjR9gdI9k6P8iZFtkA"
+    },
+    {
+      "name": "GamersLittlePlayground",
+      "handle": "@GamerLittlePlayground",
+      "url": "https://www.youtube.com/@GamerLittlePlayground/videos",
+      "channel_id": "UCpqXJOEqGS-TCnazcHCo0rA"
+    },
+    {
+      "name": "RabidRetrospectGames",
+      "handle": "@RabidRetrospectGames",
+      "url": "https://www.youtube.com/@RabidRetrospectGames/videos",
+      "channel_id": "UC3b5s-rCflpW_xMhK_d9qSw"
+    }
+  ],
+  "games": {
+    "detroit_become_human": {
+      "id": "detroit_become_human",
+      "name": "Detroit: Become Human",
+      "search_queries": [
+        "Detroit Become Human Full Movie Cutscenes 4K",
+        "Detroit Become Human All Endings Connor Markus",
+        "Detroit Become Human Hostage Connor Walkthrough"
+      ],
+      "characters": ["Connor", "Hank", "Markus", "Kara", "Daniel", "Amanda", "North"],
+      "dramatic_themes": ["Deviant or Machine", "Moral Choice", "Sacrifice", "Freedom"]
+    },
+    "gta_v": {
+      "id": "gta_v",
+      "name": "Grand Theft Auto V",
+      "search_queries": [
+        "GTA 5 All Cutscenes Full Movie 4K 60fps",
+        "GTA 5 The Third Way Ending Cutscene 4K",
+        "GTA 5 Devin Weston Death Cutscene"
+      ],
+      "characters": ["Michael", "Franklin", "Trevor", "Devin Weston", "Lester", "Lamar"],
+      "dramatic_themes": ["Betrayal", "Final Choice", "Confrontation", "Heist Resolution"]
+    },
+    "red_dead_redemption_2": {
+      "id": "red_dead_redemption_2",
+      "name": "Red Dead Redemption 2",
+      "search_queries": [
+        "Red Dead Redemption 2 Full Movie All Cutscenes 4K",
+        "RDR2 Arthur Morgan High Honor Ending Cutscene",
+        "RDR2 Arthur Confronts Dutch and Micah 4K"
+      ],
+      "characters": ["Arthur Morgan", "Dutch van der Linde", "John Marston", "Micah Bell", "Sadie Adler"],
+      "dramatic_themes": ["Redemption", "Loyalty", "Betrayal", "Final Stand"]
+    },
+    "god_of_war_ragnarok": {
+      "id": "god_of_war_ragnarok",
+      "name": "God of War Ragnarök",
+      "search_queries": [
+        "God of War Ragnarok All Cutscenes Full Movie 4K",
+        "God of War Ragnarok Kratos vs Thor Cutscenes",
+        "God of War Ragnarok Odin Confrontation Ending"
+      ],
+      "characters": ["Kratos", "Atreus", "Thor", "Odin", "Freya", "Mimir", "Angrboda"],
+      "dramatic_themes": ["Fate vs Choice", "Family", "Godhood", "War Resolution"]
+    },
+    "cyberpunk_2077": {
+      "id": "cyberpunk_2077",
+      "name": "Cyberpunk 2077",
+      "search_queries": [
+        "Cyberpunk 2077 Phantom Liberty All Cutscenes Full Movie",
+        "Cyberpunk 2077 V and Johnny Silverhand Best Cutscenes",
+        "Cyberpunk 2077 Don't Fear The Reaper Ending 4K"
+      ],
+      "characters": ["V", "Johnny Silverhand", "Songbird", "Reed", "Panam", "Judy"],
+      "dramatic_themes": ["Survival", "Identity", "Transhumanism", "The Final Contract"]
+    },
+    "the_last_of_us": {
+      "id": "the_last_of_us",
+      "name": "The Last of Us Part 1",
+      "search_queries": [
+        "The Last of Us Part 1 Remake Full Movie All Cutscenes 4K",
+        "The Last of Us Joel Saves Ellie Hospital Cutscene 4K",
+        "The Last of Us Best Story Dialogue Cutscenes"
+      ],
+      "characters": ["Joel", "Ellie", "Marlene", "Tess", "Tommy"],
+      "dramatic_themes": ["Fatherhood", "Sacrifice", "Selfish Love", "Truth vs Lie"]
+    }
+  }
+}

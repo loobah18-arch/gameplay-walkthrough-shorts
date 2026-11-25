@@ -63,6 +63,21 @@ class SubtitleBuilder:
         return "\\N".join(highlighted_parts)
 
     @classmethod
+    def format_header_question(cls, question: str) -> str:
+        """
+        Formats AniDoc-style engaging question:
+        'Setup Premise | Debate Question?' -> Left white, Right highlighted in gold.
+        """
+        cleaned = cls._escape_ass_text(question).strip()
+        if "|" in cleaned:
+            premise, debate = cleaned.split("|", 1)
+            premise = premise.strip()
+            debate = debate.strip()
+            hl = SUBTITLE_STYLE["highlight_color"]
+            return f"{{\\b1\\c&H00FFFFFF&}}{premise} {{\\c&H00A0A0A0&}}| {{\\c{hl}\\b1}}{debate}"
+        return f"{{\\b1\\c&H00FFFFFF&}}{cleaned}"
+
+    @classmethod
     def generate_ass(
         cls,
         cues: List[Dict[str, Any]],
@@ -70,11 +85,13 @@ class SubtitleBuilder:
         aspect_ratio_key: str = "square",
         time_offset: float = 0.0,
         max_duration: Optional[float] = None,
+        top_question: Optional[str] = None,
     ) -> str:
         """
-        Generates a complete ASS subtitle file.
+        Generates a complete ASS subtitle file with optional AniDoc top engaging question.
         `time_offset`: subtracts start_time of clip so subtitle timing starts at 0.0s.
         `max_duration`: optional clip duration ceiling so trailing cues don't overflow.
+        `top_question`: optional engaging question placed at the top (safe-zone header).
         """
         if aspect_ratio_key not in ASPECT_RATIOS:
             aspect_ratio_key = "square"
@@ -94,11 +111,13 @@ class SubtitleBuilder:
             if is_square
             else SUBTITLE_STYLE["margin_v_vertical"]
         )
+        header_font_size = 36 if is_square else 42
+        header_margin_v = 45 if is_square else 140
 
         header = f"""[Script Info]
 Title: Cinematic Walkthrough Short Subtitles
 ScriptType: v4.00+
-WrapStyle: 0
+WrapStyle: 1
 ScaledBorderAndShadow: yes
 YCbCr Matrix: TV.601
 PlayResX: {res_x}
@@ -107,12 +126,19 @@ PlayResY: {res_y}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: CinematicDefault,{SUBTITLE_STYLE['font_name']},{font_size},{SUBTITLE_STYLE['primary_color']},&H000000FF,{SUBTITLE_STYLE['outline_color']},{SUBTITLE_STYLE['outline_color']},1,0,0,0,100,100,0.5,0,1,{SUBTITLE_STYLE['outline_width']},{SUBTITLE_STYLE['shadow_depth']},2,40,40,{margin_v},1
+Style: HeaderQuestion,{SUBTITLE_STYLE['font_name']},{header_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0.5,0,1,2.8,1.8,8,50,50,{header_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
         events = []
+        clip_end_sec = max_duration if max_duration is not None else 58.0
+        if top_question and top_question.strip():
+            styled_q = cls.format_header_question(top_question)
+            end_q_str = cls.format_ass_time(clip_end_sec)
+            events.append(f"Dialogue: 1,0:00:00.00,{end_q_str},HeaderQuestion,,0,0,0,,{styled_q}")
+
         for cue in cues:
             rel_start = cue["start"] - time_offset
             rel_end = cue["end"] - time_offset

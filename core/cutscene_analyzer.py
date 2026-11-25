@@ -233,6 +233,37 @@ class CutsceneAnalyzer:
 
         return score
 
+    GAMEPLAY_BLACKLIST_KEYWORDS = [
+        "gameplay", "free roam", "freeroam", "roaming", "exploration", "side quest",
+        "looting", "driving around", "traversal", "inventory", "open world",
+        "collectible", "easter egg", "tutorial", "practice",
+    ]
+
+    CUTSCENE_WHITELIST_KEYWORDS = [
+        "cutscene", "cinematic", "ending", "story", "confrontation", "interrogation",
+        "decision", "choice", "climax", "final", "meeting", "face off", "standoff",
+        "dialogue", "conversation", "boss", "reveal", "truth", "death",
+    ]
+
+    @classmethod
+    def score_chapter_cutscene_affinity(cls, title: str) -> float:
+        """
+        Scores chapter title: heavily rewards cinematic cutscene markers and
+        heavily penalizes/discards pure gameplay, free roam, and traversal.
+        """
+        if not title:
+            return 0.0
+        lower = title.lower()
+        for bad in cls.GAMEPLAY_BLACKLIST_KEYWORDS:
+            if bad in lower:
+                return -100.0  # Hard reject
+
+        score = 0.0
+        for good in cls.CUTSCENE_WHITELIST_KEYWORDS:
+            if good in lower:
+                score += 15.0
+        return score
+
     def find_viral_segments(
         self,
         cues: List[Dict[str, Any]],
@@ -241,9 +272,11 @@ class CutsceneAnalyzer:
         max_duration: int = 60,
         require_payoff: bool = True,
         min_payoff_score: float = 4.0,
+        min_dialogue_lines: int = 4,
     ) -> List[Dict[str, Any]]:
         """
         Scans cues with a sliding window to identify top cutscene segments.
+        Filters out sparse gameplay stretches (requires min_dialogue_lines).
         When require_payoff=True, strictly filters out candidates lacking a definitive climax,
         punchline, or moral choice, and returns [] if none meet the threshold.
         """
@@ -273,6 +306,10 @@ class CutsceneAnalyzer:
                 accumulated_body_score += self.score_text(cue["text"])
 
                 if dur >= min_duration:
+                    if len(current_cues) < min_dialogue_lines:
+                        # Exclude sparse gameplay sections with isolated grunts or words
+                        continue
+
                     next_cue = cues[j + 1] if (j + 1 < n) else None
                     payoff = self.score_payoff(cue, next_cue=next_cue)
 
