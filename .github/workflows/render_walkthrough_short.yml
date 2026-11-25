@@ -16,11 +16,13 @@ on:
         required: true
         default: '55'
       aspect_ratio:
-        description: 'Aspect ratio (square 1:1 like SaisenGames kepvkxTGqVM, or vertical 9:16)'
+        description: 'Aspect ratio (vertical_letterbox like xoJydV-xKVw, square_letterbox, square 1:1, or vertical 9:16)'
         required: true
-        default: 'square'
+        default: 'vertical_letterbox'
         type: choice
         options:
+          - 'vertical_letterbox'
+          - 'square_letterbox'
           - 'square'
           - 'square_hd'
           - 'vertical_crop'

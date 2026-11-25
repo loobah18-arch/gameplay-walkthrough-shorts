@@ -65,17 +65,41 @@ class SubtitleBuilder:
     @classmethod
     def format_header_question(cls, question: str) -> str:
         """
-        Formats AniDoc-style engaging question:
-        'Setup Premise | Debate Question?' -> Left white, Right highlighted in gold.
+        Formats clear, concise, and engaging question hooks matching reference style xoJydV-xKVw:
+        All-caps, clean white with provocative debate words in punchy crimson red or gold.
+        Strips verbose location premises (e.g. 'FOO AT CLIFF | ' -> 'DID DEVIN WESTON DESERVE THIS ENDING?').
         """
-        cleaned = cls._escape_ass_text(question).strip()
+        cleaned = cls._escape_ass_text(question).strip().upper()
+        # If a pipe premise exists, extract the punchy question part
         if "|" in cleaned:
-            premise, debate = cleaned.split("|", 1)
-            premise = premise.strip()
-            debate = debate.strip()
-            hl = SUBTITLE_STYLE["highlight_color"]
-            return f"{{\\b1\\c&H00FFFFFF&}}{premise} {{\\c&H00A0A0A0&}}| {{\\c{hl}\\b1}}{debate}"
-        return f"{{\\b1\\c&H00FFFFFF&}}{cleaned}"
+            parts = cleaned.split("|", 1)
+            cleaned = parts[1].strip() if ("?" in parts[1] or len(parts[1].strip()) > 5) else parts[0].strip()
+
+        # Accent highlight color (vibrant red &H002020FF& or gold &H0000D4FF&)
+        hl = SUBTITLE_STYLE.get("accent_color", "&H002020FF&")
+        white = "&H00FFFFFF&"
+
+        # Highlight key dramatic words
+        keywords = [
+            "DESERVE", "ENDING", "1V1", "BEAT", "COLDEST", "SURVIVE",
+            "KILL", "CHOICE", "BETRAYAL", "VILLAIN", "REDEMPTION",
+            "DEVIANT", "SACRIFICE", "MACHINE", "TRUTH", "CANON",
+            "MONSTER", "EVIL", "WRONG", "RIGHT", "FORGIVE", "DEAD"
+        ]
+
+        pattern = re.compile(r"\b(" + "|".join(re.escape(k) for k in keywords) + r")\b", re.IGNORECASE)
+        if pattern.search(cleaned):
+            styled = pattern.sub(lambda m: f"{{\\c{hl}\\b1}}{m.group(0)}{{\\c{white}\\b1}}", cleaned)
+            return f"{{\\b1\\c{white}}}{styled}"
+
+        # If no specific keyword matched, highlight the last 1-2 words
+        words = cleaned.split()
+        if len(words) > 3:
+            lead = " ".join(words[:-2])
+            tail = " ".join(words[-2:])
+            return f"{{\\b1\\c{white}}}{lead} {{\\c{hl}\\b1}}{tail}"
+
+        return f"{{\\b1\\c{white}}}{cleaned}"
 
     @classmethod
     def generate_ass(
@@ -111,8 +135,25 @@ class SubtitleBuilder:
             if is_square
             else SUBTITLE_STYLE["margin_v_vertical"]
         )
-        header_font_size = 36 if is_square else 42
-        header_margin_v = 45 if is_square else 140
+
+        if aspect_ratio_key == "vertical_letterbox":
+            # 1080x1920 canvas with 16:9 cutscene centered (y=656 to 1264).
+            # Top black bar is 656px tall (y=0 to 656).
+            # MarginV=280 places the question centered in the top black space, safely off scenes.
+            header_font_size = 52
+            header_margin_v = 280
+        elif aspect_ratio_key == "square_letterbox":
+            # 1080x1920 canvas with 1:1 square cutscene centered (y=420 to 1500).
+            # Top black bar is 420px tall (y=0 to 420).
+            # MarginV=180 places the question centered in the top black space, safely off scenes.
+            header_font_size = 48
+            header_margin_v = 180
+        elif is_square:
+            header_font_size = 36
+            header_margin_v = 45
+        else:
+            header_font_size = 44
+            header_margin_v = 140
 
         header = f"""[Script Info]
 Title: Cinematic Walkthrough Short Subtitles
@@ -126,7 +167,7 @@ PlayResY: {res_y}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: CinematicDefault,{SUBTITLE_STYLE['font_name']},{font_size},{SUBTITLE_STYLE['primary_color']},&H000000FF,{SUBTITLE_STYLE['outline_color']},{SUBTITLE_STYLE['outline_color']},1,0,0,0,100,100,0.5,0,1,{SUBTITLE_STYLE['outline_width']},{SUBTITLE_STYLE['shadow_depth']},2,40,40,{margin_v},1
-Style: HeaderQuestion,{SUBTITLE_STYLE['font_name']},{header_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0.5,0,1,2.8,1.8,8,50,50,{header_margin_v},1
+Style: HeaderQuestion,{SUBTITLE_STYLE['font_name']},{header_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0.8,0,1,0,0,8,60,60,{header_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

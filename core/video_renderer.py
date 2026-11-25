@@ -358,9 +358,39 @@ class VideoRenderer:
         - 9:16 Vertical Center-Crop
         - 9:16 Vertical Blurred Background
         """
-        preset = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["square"])
+        preset = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["vertical_letterbox"])
         target_w = preset["width"]
         target_h = preset["height"]
+
+        if aspect_ratio == "vertical_letterbox":
+            # 16:9 widescreen cutscene centered on 1080x1920 with pure black bars on top and bottom
+            # (Matches reference style xoJydV-xKVw: text on top black bar, zero overlap with video)
+            filters = [
+                f"scale={target_w}:-2:force_original_aspect_ratio=decrease",
+                "setsar=1",
+            ]
+            if apply_enhancements:
+                filters.append(VIDEO_FILTER_ENHANCE)
+            filters.append(f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black")
+            if ass_subtitle_path and os.path.isfile(ass_subtitle_path):
+                escaped_sub = cls._escape_ffmpeg_ass_path(ass_subtitle_path)
+                filters.append(f"ass={escaped_sub}")
+            return ",".join(filters)
+
+        elif aspect_ratio == "square_letterbox":
+            # 1:1 square cutscene centered on 1080x1920 with pure black bars on top and bottom
+            filters = [
+                f"scale={target_w}:{target_w}:force_original_aspect_ratio=increase",
+                f"crop={target_w}:{target_w}",
+                "setsar=1",
+            ]
+            if apply_enhancements:
+                filters.append(VIDEO_FILTER_ENHANCE)
+            filters.append(f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black")
+            if ass_subtitle_path and os.path.isfile(ass_subtitle_path):
+                escaped_sub = cls._escape_ffmpeg_ass_path(ass_subtitle_path)
+                filters.append(f"ass={escaped_sub}")
+            return ",".join(filters)
 
         if aspect_ratio == "vertical_blurred":
             bg_filter = (

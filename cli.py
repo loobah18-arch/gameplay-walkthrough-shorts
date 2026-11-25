@@ -504,13 +504,13 @@ def cmd_daily_job(args):
         url=vid_url,
         start=start_sec,
         end=end_sec,
-        aspect_ratio="square",
+        aspect_ratio="vertical_letterbox",
         enable_subtitles=True,
         cookies=args.cookies,
         proxy=args.proxy,
         po_token=getattr(args, "po_token", None),
         visitor_data=getattr(args, "visitor_data", None),
-        output=f"{re.sub(r'[^A-Za-z0-9]+', '_', scene_title)[:40]}_square.mp4",
+        output=f"{re.sub(r'[^A-Za-z0-9]+', '_', scene_title)[:40]}_letterbox.mp4",
         top_question=top_question,
         game=game_name,
         title=f"{scene_title} | {game_name}",
@@ -570,7 +570,7 @@ def main():
     p_cloud.add_argument("--url", required=True, help="YouTube video URL")
     p_cloud.add_argument("--start", required=True, type=parse_timestamp_arg, help="Start time in seconds or HH:MM:SS")
     p_cloud.add_argument("--end", required=True, type=parse_timestamp_arg, help="End time in seconds or HH:MM:SS")
-    p_cloud.add_argument("--aspect-ratio", default="square", choices=list(ASPECT_RATIOS.keys()))
+    p_cloud.add_argument("--aspect-ratio", default=DEFAULT_ASPECT_RATIO, choices=list(ASPECT_RATIOS.keys()))
     p_cloud.add_argument("--enable-subtitles", action="store_true", default=False, help="Burn styled ASS subtitles")
     p_cloud.add_argument("--no-subtitles", dest="enable_subtitles", action="store_false", help="Disable ASS subtitles")
     p_cloud.add_argument("--top-question", help="AniDoc-style top engaging question header")

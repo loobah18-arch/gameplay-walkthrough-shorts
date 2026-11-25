@@ -15,8 +15,25 @@ DEFAULT_GITHUB_REPO = "loobah18-arch/gameplay-walkthrough-shorts"
 DEFAULT_WORKFLOW_FILE = "render_walkthrough_short.yml"
 
 # Aspect Ratio Presets
-# Reference style (https://youtube.com/shorts/kepvkxTGqVM) uses high-resolution 1:1 square
+# Reference style (https://youtube.com/shorts/xoJydV-xKVw) uses 9:16 vertical canvas
+# with cutscene centered and pure black bars on top and bottom for engaging questions.
 ASPECT_RATIOS: Dict[str, Dict[str, Any]] = {
+    "vertical_letterbox": {
+        "name": "9:16 Vertical Letterbox (Black Bars, Reference Style xoJydV-xKVw)",
+        "width": 1080,
+        "height": 1920,
+        "play_res_x": 1080,
+        "play_res_y": 1920,
+        "description": "16:9 cutscene centered with pure black bars on top & bottom. Header question on top black space.",
+    },
+    "square_letterbox": {
+        "name": "9:16 Square in Vertical Letterbox (1:1 Square + Black Bars)",
+        "width": 1080,
+        "height": 1920,
+        "play_res_x": 1080,
+        "play_res_y": 1920,
+        "description": "1:1 square cutscene centered with pure black bars on top & bottom. Header question on top black space.",
+    },
     "square": {
         "name": "1:1 Square (Cinematic Cutscene Reference Style)",
         "width": 1080,
@@ -51,7 +68,7 @@ ASPECT_RATIOS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-DEFAULT_ASPECT_RATIO = "square"
+DEFAULT_ASPECT_RATIO = "vertical_letterbox"
 
 # Subtitle Styling Constants (ASS Format)
 SUBTITLE_STYLE = {
@@ -61,6 +78,7 @@ SUBTITLE_STYLE = {
     "font_size_vertical": 54,
     "primary_color": "&H00FFFFFF&",    # Crisp white text
     "highlight_color": "&H0000D4FF&",  # Warm golden amber / yellow for active keywords
+    "accent_color": "&H002020FF&",     # Vibrant crimson red for debate question keywords (xoJydV-xKVw style)
     "outline_color": "&H00000000&",    # Solid black outline
     "outline_width": 3.5,
     "shadow_depth": 1.5,
