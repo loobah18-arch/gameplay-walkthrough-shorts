@@ -14,35 +14,53 @@ class SubtitleBuilder:
     @staticmethod
     def format_ass_time(seconds: float) -> str:
         """Converts float seconds into ASS timestamp format: H:MM:SS.cc"""
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        cs = int(round((seconds - int(seconds)) * 100))
-        if cs >= 100:
-            cs = 99
+        total_cs = int(round(max(0.0, float(seconds)) * 100))
+        h, rem = divmod(total_cs, 360000)
+        m, rem = divmod(rem, 6000)
+        s, cs = divmod(rem, 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    @staticmethod
+    def _escape_ass_text(text: str) -> str:
+        """Escapes braces and normalizes line breaks for safe ASS Dialogue lines."""
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        # Escape backslashes/braces so raw subtitle braces are not parsed as override tags
+        normalized = normalized.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        return normalized.replace("\n", "\\N")
 
     @classmethod
     def highlight_text(cls, text: str, keywords: List[str] = DRAMATIC_KEYWORDS) -> str:
         """
-        Wraps matched emotional/dramatic keywords in ASS color override tags.
-        Primary: White (&H00FFFFFF&), Highlight: Gold Amber (&H0000D4FF&)
+        Wraps matched emotional/dramatic words or multi-word phrases in ASS color tags.
+        Preserves CinematicDefault Bold=1 styling after highlighted spans.
         """
-        words = text.split()
-        styled_words = []
+        safe_text = cls._escape_ass_text(text)
+        if not safe_text or not keywords:
+            return safe_text
+
         highlight_color = SUBTITLE_STYLE["highlight_color"]
         primary_color = SUBTITLE_STYLE["primary_color"]
 
-        lower_keywords = {k.lower() for k in keywords}
+        cleaned_kws = sorted({k.strip() for k in keywords if k and k.strip()}, key=len, reverse=True)
+        if not cleaned_kws:
+            return safe_text
 
-        for w in words:
-            clean_word = re.sub(r"[^\w]", "", w).lower()
-            if clean_word in lower_keywords:
-                styled_words.append(f"{{\\c{highlight_color}\\b1}}{w}{{\\c{primary_color}\\b0}}")
-            else:
-                styled_words.append(w)
+        pattern = re.compile(
+            r"(?<!\w)(" + "|".join(re.escape(k) for k in cleaned_kws) + r")(?!\w)",
+            re.IGNORECASE,
+        )
 
-        return " ".join(styled_words)
+        # Avoid matching inside existing \N newline escapes by protecting \N
+        parts = safe_text.split("\\N")
+        highlighted_parts = []
+        for part in parts:
+            highlighted_parts.append(
+                pattern.sub(
+                    lambda m: f"{{\\c{highlight_color}\\b1}}{m.group(0)}{{\\c{primary_color}\\b1}}",
+                    part,
+                )
+            )
+        return "\\N".join(highlighted_parts)
 
     @classmethod
     def generate_ass(
@@ -51,12 +69,17 @@ class SubtitleBuilder:
         output_path: str,
         aspect_ratio_key: str = "square",
         time_offset: float = 0.0,
+        max_duration: Optional[float] = None,
     ) -> str:
         """
         Generates a complete ASS subtitle file.
         `time_offset`: subtracts start_time of clip so subtitle timing starts at 0.0s.
+        `max_duration`: optional clip duration ceiling so trailing cues don't overflow.
         """
-        preset = ASPECT_RATIOS.get(aspect_ratio_key, ASPECT_RATIOS["square"])
+        if aspect_ratio_key not in ASPECT_RATIOS:
+            aspect_ratio_key = "square"
+
+        preset = ASPECT_RATIOS[aspect_ratio_key]
         res_x = preset["play_res_x"]
         res_y = preset["play_res_y"]
 
@@ -91,12 +114,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         events = []
         for cue in cues:
-            start_sec = max(0.0, cue["start"] - time_offset)
-            end_sec = max(start_sec + 0.5, cue["end"] - time_offset)
+            rel_start = cue["start"] - time_offset
+            rel_end = cue["end"] - time_offset
+
+            # Skip cues that end completely before the clip starts
+            if rel_end <= 0.0:
+                continue
+            if max_duration is not None and rel_start >= max_duration:
+                continue
+
+            start_sec = max(0.0, rel_start)
+            end_sec = rel_end if max_duration is None else min(rel_end, max_duration)
+            if end_sec <= start_sec:
+                end_sec = start_sec + 0.5
+                if max_duration is not None:
+                    end_sec = min(end_sec, max_duration)
 
             start_str = cls.format_ass_time(start_sec)
             end_str = cls.format_ass_time(end_sec)
             styled_text = cls.highlight_text(cue["text"])
+            if not styled_text:
+                continue
 
             events.append(f"Dialogue: 0,{start_str},{end_str},CinematicDefault,,0,0,0,,{styled_text}")
 

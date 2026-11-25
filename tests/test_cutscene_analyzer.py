@@ -13,7 +13,6 @@ class TestCutsceneAnalyzer(unittest.TestCase):
         self.assertGreaterEqual(score_high, 7.0)
 
     def test_check_incomplete_ending(self):
-        # Incomplete sentence endings should return True
         self.assertTrue(self.analyzer.check_incomplete_ending("and then he went to the"))
         self.assertTrue(self.analyzer.check_incomplete_ending("because if we don't"))
         self.assertTrue(self.analyzer.check_incomplete_ending("Wait, but..."))
@@ -21,7 +20,6 @@ class TestCutsceneAnalyzer(unittest.TestCase):
         self.assertTrue(self.analyzer.check_incomplete_ending("He was going to"))
         self.assertTrue(self.analyzer.check_incomplete_ending(""))
 
-        # Complete and definitive endings should return False
         self.assertFalse(self.analyzer.check_incomplete_ending("That is my purpose."))
         self.assertFalse(self.analyzer.check_incomplete_ending("I made my choice!"))
         self.assertFalse(self.analyzer.check_incomplete_ending("Drop your weapon."))
@@ -55,6 +53,22 @@ class TestCutsceneAnalyzer(unittest.TestCase):
         self.assertTrue(payoff["has_payoff"])
         self.assertEqual(payoff["payoff_type"], "revelation_or_truth")
 
+    def test_score_payoff_no_substring_false_positive_and_quoted_ending(self):
+        # Word-boundary prevents matching "shoot" inside "photoshoot"
+        mundane = self.analyzer.score_payoff(
+            {"start": 10.0, "end": 12.0, "text": "There was a photoshoot"},
+            next_cue={"start": 12.2, "end": 14.0, "text": "Next line."},
+        )
+        self.assertNotEqual(mundane["payoff_type"], "decision_or_climax")
+
+        # Quoted terminal punctuation still earns punctuation closure
+        quoted = self.analyzer.score_payoff(
+            {"start": 20.0, "end": 23.0, "text": 'He told me "We leave tomorrow!"'},
+            next_cue={"start": 25.0, "end": 28.0, "text": "End."},
+        )
+        self.assertTrue(quoted["has_payoff"])
+        self.assertEqual(quoted["payoff_type"], "definitive_closure")
+
     def test_score_payoff_incomplete_rejected(self):
         cue = {"start": 20.0, "end": 24.0, "text": "We need to go right now because"}
         next_cue = {"start": 24.1, "end": 26.0, "text": "it is too dangerous."}
@@ -83,25 +97,37 @@ class TestCutsceneAnalyzer(unittest.TestCase):
             {"start": 10.0, "end": 15.0, "text": "Are you afraid of death?"},
             {"start": 15.0, "end": 22.0, "text": "Machines don't have emotions."},
             {"start": 22.0, "end": 35.0, "text": "I feel alive. I don't want to die!"},
-            {"start": 35.0, "end": 42.0, "text": "You have to choose and"},  # Incomplete ending
-            {"start": 42.0, "end": 50.0, "text": "That is my purpose."},     # Proper payoff (mic drop)
+            {"start": 35.0, "end": 42.0, "text": "You have to choose and"},
+            {"start": 42.0, "end": 50.0, "text": "That is my purpose."},
         ]
 
-        # With require_payoff=True
         segments = self.analyzer.find_viral_segments(cues, min_duration=25, max_duration=60, require_payoff=True)
         self.assertGreater(len(segments), 0)
 
-        # Every selected segment must end with a valid payoff
         for seg in segments:
             self.assertTrue(seg["has_proper_payoff"])
             self.assertIn(seg["payoff_type"], ["mic_drop", "decision_or_climax", "revelation_or_truth", "definitive_closure"])
             self.assertFalse(seg["closing_dialogue"].endswith("and"))
 
+    def test_find_viral_segments_strict_returns_empty_and_respects_max_dur(self):
+        cues = [
+            {"start": 0.0, "end": 15.0, "text": "First we walked down the street and"},
+            {"start": 15.0, "end": 70.0, "text": "then we saw another car because"},
+        ]
+        # Strict require_payoff=True must NOT return incomplete segments
+        strict = self.analyzer.find_viral_segments(cues, min_duration=25, max_duration=40, require_payoff=True)
+        self.assertEqual(strict, [])
+
+        # Open-ended fallback must respect max_duration=40
+        relaxed = self.analyzer.find_viral_segments(cues, min_duration=25, max_duration=40, require_payoff=False)
+        self.assertEqual(len(relaxed), 1)
+        self.assertLessEqual(relaxed[0]["duration"], 40.0)
+
     def test_generate_short_title(self):
         title = CutsceneAnalyzer.generate_short_title(
             "Detroit: Become Human",
             "Connor Is Just a Machine",
-            payoff_phrase="That Is My Purpose"
+            payoff_phrase="That Is My Purpose",
         )
         self.assertIn("Detroit: Become Human", title)
         self.assertIn("That Is My Purpose", title)

@@ -4,8 +4,10 @@ Handles selective segment downloading via yt-dlp and builds professional filterg
 for 1:1 Square (Detroit Connor reference style) and 9:16 Vertical video.
 """
 import os
-import shutil
+import re
+import shlex
 import subprocess
+import uuid
 from typing import Dict, Any, List, Optional
 from config.settings import (
     ASPECT_RATIOS,
@@ -14,7 +16,6 @@ from config.settings import (
     OUTPUT_DIR,
     TEMP_DIR,
 )
-from core.cookie_manager import CookieManager
 
 
 class VideoRenderer:
@@ -25,6 +26,43 @@ class VideoRenderer:
         self.temp_dir = temp_dir
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.temp_dir, exist_ok=True)
+
+    @staticmethod
+    def _redact_cmd_for_log(cmd: List[str]) -> str:
+        """Redacts proxy credentials, PO tokens, and visitor data from command logs."""
+        redacted = []
+        mask_next = False
+        for token in cmd:
+            if mask_next:
+                redacted.append("***REDACTED***")
+                mask_next = False
+            elif token == "--proxy":
+                redacted.append(token)
+                mask_next = True
+            elif token.startswith("youtube:po_token=") or token.startswith("youtube:visitor_data="):
+                key = token.split("=", 1)[0]
+                redacted.append(f"{key}=***REDACTED***")
+            else:
+                redacted.append(shlex.quote(token) if " " in token else token)
+        return " ".join(redacted)
+
+    @staticmethod
+    def _format_hms(seconds: float) -> str:
+        """Formats non-negative seconds as HH:MM:SS (preserving .mmm when fractional)."""
+        total_ms = int(round(max(0.0, float(seconds)) * 1000))
+        h, rem = divmod(total_ms, 3600000)
+        m, rem = divmod(rem, 60000)
+        s, ms = divmod(rem, 1000)
+        if ms == 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+    @staticmethod
+    def _escape_ffmpeg_ass_path(path: str) -> str:
+        """Escapes ASS path across both libavfilter filtergraph and av_get_token option levels."""
+        normalized = path.replace("\\", "/")
+        s1 = re.sub(r"([\\:'])", r"\\\1", normalized)
+        return re.sub(r"([\\:'\[\],; ])", r"\\\1", s1)
 
     @staticmethod
     def build_ytdlp_download_cmd(
@@ -43,7 +81,7 @@ class VideoRenderer:
     ) -> List[str]:
         """
         Builds yt-dlp command using --download-sections or full file ingestion.
-        Enforces IPv4, Node.js runtime, native downloader, and PO tokens.
+        Enforces IPv4, Node.js runtime, native downloader, and web PO tokens.
         """
         cmd = [
             "yt-dlp",
@@ -55,20 +93,15 @@ class VideoRenderer:
         ]
 
         if use_download_sections and start_time is not None and end_time is not None:
-            def to_hms(s: float) -> str:
-                h = int(s // 3600)
-                m = int((s % 3600) // 60)
-                sec = int(s % 60)
-                return f"{h:02d}:{m:02d}:{sec:02d}"
-
-            section = f"*{to_hms(start_time)}-{to_hms(end_time)}"
+            section = f"*{VideoRenderer._format_hms(start_time)}-{VideoRenderer._format_hms(end_time)}"
             cmd.extend(["--download-sections", section, "--force-keyframes-at-cuts"])
 
         if client_override:
             cmd.extend(["--extractor-args", f"youtube:player_client={client_override}"])
 
-        pot = po_token or os.environ.get("YT_PO_TOKEN")
-        vis = visitor_data or os.environ.get("YT_VISITOR_DATA")
+        is_web_client = "web" in (client_override or "")
+        pot = po_token if po_token is not None else (os.environ.get("YT_PO_TOKEN") if is_web_client else None)
+        vis = visitor_data if visitor_data is not None else (os.environ.get("YT_VISITOR_DATA") if is_web_client else None)
         if pot:
             cmd.extend(["--extractor-args", f"youtube:po_token=web.gvs+{pot}"])
         if vis:
@@ -127,20 +160,23 @@ class VideoRenderer:
     ) -> str:
         """
         Multi-tier cascading downloader:
-        Tier 1: Apple VisionOS client (NO cookies — pristine 1080p DASH stream, bypasses datacenter blocks).
-        Tier 2: Android client (NO cookies — fast progressive/360p/720p fallback).
-        Tier 3: Authenticated download with cookies + PO Token (for age-gated or member videos).
-        Tier 4: iOS client without cookies.
-        Tier 5: Full-file progressive native download + local ffmpeg cut.
+        Tier 1: Apple VisionOS client (NO cookies — pristine 1080p DASH stream, bypasses SABR web blocks).
+        Tier 2: Android / Android VR client (NO cookies — fast fallback).
+        Tier 3: Authenticated download with cookies + PO Token across web_safari, mweb, web.
+        Tier 4: iOS / TV client without cookies.
+        Tier 5: Full-file progressive native download + frame-accurate ffmpeg cut (with cleanup).
         """
+        if end_time <= start_time:
+            raise ValueError(f"end_time ({end_time}) must be greater than start_time ({start_time})")
+
         def run_ytdlp(cmd: List[str]) -> bool:
-            print(f"▶️ Executing: {' '.join(cmd)}")
+            print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd)}")
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             if res.stdout:
                 print(res.stdout)
             return res.returncode == 0 and cls.check_file_exists(output_filepath)
 
-        # Tier 1: Apple VisionOS client (NO cookies — verified pristine 1080p, bypasses datacenter blocks)
+        # Tier 1: Apple VisionOS client (NO cookies)
         print("🔄 [Tier 1] Trying VisionOS client (1080p pristine, no cookies)...")
         cmd1 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
@@ -160,7 +196,7 @@ class VideoRenderer:
                 print(f"✅ [Tier 1] VisionOS 1080p section download succeeded: {found}")
                 return found
 
-        # Tier 2: Android client (NO cookies — proven rapid progressive fallback)
+        # Tier 2: Android client (NO cookies)
         print("🔄 [Tier 2] Trying Android client (no cookies)...")
         cmd2 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
@@ -169,9 +205,9 @@ class VideoRenderer:
             output_filepath=output_filepath,
             cookies_path=None,
             proxy=proxy,
-            client_override="android",
+            client_override="android,android_vr",
             use_cookies=False,
-            format_spec="18/best[height<=720]/b",
+            format_spec="bestvideo[height<=1080]+bestaudio/best[height<=720]/18/b",
             use_download_sections=True,
         )
         if run_ytdlp(cmd2):
@@ -180,9 +216,9 @@ class VideoRenderer:
                 print(f"✅ [Tier 2] Android client section download succeeded: {found}")
                 return found
 
-        # Tier 3: Cookies with PO token (for age-gated or member videos)
+        # Tier 3: Cookies with PO token across web_safari, mweb, web (HLS + DASH bypass)
         if cookies_path and os.path.isfile(cookies_path):
-            print("🔄 [Tier 3] Trying section download with cookies + PO Token (web)...")
+            print("🔄 [Tier 3] Trying section download with cookies + PO Token (web_safari,mweb,web)...")
             cmd3 = cls.build_ytdlp_download_cmd(
                 video_url=video_url,
                 start_time=start_time,
@@ -190,11 +226,11 @@ class VideoRenderer:
                 output_filepath=output_filepath,
                 cookies_path=cookies_path,
                 proxy=proxy,
-                client_override="web",
+                client_override="web_safari,mweb,web",
                 use_cookies=True,
                 po_token=po_token,
                 visitor_data=visitor_data,
-                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/22/18/b",
+                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/96/95/22/18/b",
                 use_download_sections=True,
             )
             if run_ytdlp(cmd3):
@@ -203,8 +239,8 @@ class VideoRenderer:
                     print(f"✅ [Tier 3] Authenticated section download succeeded: {found}")
                     return found
 
-        # Tier 4: iOS client fallback without cookies
-        print("🔄 [Tier 4] Falling back to iOS client without cookies...")
+        # Tier 4: iOS / TV client fallback without cookies
+        print("🔄 [Tier 4] Falling back to iOS/TV client without cookies...")
         cmd4 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
             start_time=start_time,
@@ -212,7 +248,7 @@ class VideoRenderer:
             output_filepath=output_filepath,
             cookies_path=None,
             proxy=proxy,
-            client_override="ios",
+            client_override="ios,tv",
             use_cookies=False,
             format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
             use_download_sections=True,
@@ -220,45 +256,56 @@ class VideoRenderer:
         if run_ytdlp(cmd4):
             found = cls.find_existing_media_file(output_filepath)
             if found:
-                print(f"✅ [Tier 4] iOS client section download succeeded: {found}")
+                print(f"✅ [Tier 4] iOS/TV client section download succeeded: {found}")
                 return found
 
-        # Tier 5: Full-file progressive native download + local ffmpeg cut
-        print("🔄 [Tier 5] Fallback: Full-file progressive native download + local ffmpeg cut...")
-        temp_full = os.path.join(os.path.dirname(output_filepath), "full_source.mp4")
+        # Tier 5: Full-file progressive native download + frame-accurate ffmpeg cut
+        print("🔄 [Tier 5] Fallback: Full-file progressive native download + frame-accurate ffmpeg cut...")
+        temp_full = os.path.join(
+            os.path.dirname(os.path.abspath(output_filepath)),
+            f"full_source_{uuid.uuid4().hex[:8]}.mp4",
+        )
         cmd5 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
             start_time=None,
             end_time=None,
             output_filepath=temp_full,
-            cookies_path=None,
+            cookies_path=cookies_path if (cookies_path and os.path.isfile(cookies_path)) else None,
             proxy=proxy,
-            client_override="android",
+            client_override="visionos,android",
             use_cookies=False,
             format_spec="18/best[height<=720]/b",
             use_download_sections=False,
         )
-        print(f"▶️ Executing: {' '.join(cmd5)}")
+        print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd5)}")
         res5 = subprocess.run(cmd5, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if res5.stdout:
             print(res5.stdout)
 
         actual_full = cls.find_existing_media_file(temp_full)
-        if actual_full and os.path.isfile(actual_full):
-            print(f"✂️ Cutting section {start_time}s to {end_time}s locally via ffmpeg...")
-            cut_cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(start_time),
-                "-to", str(end_time),
-                "-i", actual_full,
-                "-c", "copy",
-                output_filepath
-            ]
-            subprocess.run(cut_cmd, check=True)
-            found = cls.find_existing_media_file(output_filepath)
-            if found:
-                print(f"✅ [Tier 5] Successfully extracted clip from full download: {found}")
-                return found
+        try:
+            if actual_full and os.path.isfile(actual_full):
+                print(f"✂️ Cutting section {start_time}s to {end_time}s via frame-accurate ffmpeg...")
+                cut_cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(start_time),
+                    "-to", str(end_time),
+                    "-i", actual_full,
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                    "-c:a", "aac", "-b:a", "192k",
+                    output_filepath,
+                ]
+                subprocess.run(cut_cmd, check=True)
+                found = cls.find_existing_media_file(output_filepath)
+                if found:
+                    print(f"✅ [Tier 5] Successfully extracted clip from full download: {found}")
+                    return found
+        finally:
+            if actual_full and os.path.isfile(actual_full):
+                try:
+                    os.remove(actual_full)
+                except OSError:
+                    pass
 
         raise RuntimeError(f"All download tiers failed for {video_url}")
 
@@ -271,7 +318,7 @@ class VideoRenderer:
     ) -> str:
         """
         Generates FFmpeg filter_complex for:
-        - 1:1 Square (crops widescreen to centered high-detail square, matching kepvkxTGqVM)
+        - 1:1 Square (crops widescreen/portrait safely to centered square)
         - 9:16 Vertical Center-Crop
         - 9:16 Vertical Blurred Background
         """
@@ -279,44 +326,33 @@ class VideoRenderer:
         target_w = preset["width"]
         target_h = preset["height"]
 
-        filters = []
-
-        if aspect_ratio in ["square", "square_hd"]:
-            # Crop 16:9 widescreen to 1:1 square centered on gameplay
-            filters.append(
-                f"scale=-2:{target_h}:force_original_aspect_ratio=increase,"
-                f"crop={target_w}:{target_h}"
-            )
-        elif aspect_ratio == "vertical_crop":
-            # Direct vertical 9:16 crop
-            filters.append(
-                f"scale=-2:{target_h}:force_original_aspect_ratio=increase,"
-                f"crop={target_w}:{target_h}"
-            )
-        elif aspect_ratio == "vertical_blurred":
-            # Blurred background + sharp centered 16:9 gameplay
+        if aspect_ratio == "vertical_blurred":
             bg_filter = (
                 f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-                f"crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.08:contrast=1.05[bg]"
+                f"setsar=1,crop={target_w}:{target_h},boxblur=25:5,eq=brightness=-0.08:contrast=1.05[bg]"
             )
-            fg_filter = f"[0:v]scale={target_w}:-2[fg]"
-            overlay_filter = f"[bg][fg]overlay=(W-w)/2:(H-h)/2[base]"
-            sub_filter = ""
+            fg_enhance = f",{VIDEO_FILTER_ENHANCE}" if apply_enhancements else ""
+            fg_filter = f"[0:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,setsar=1{fg_enhance}[fg]"
+            overlay_filter = "[bg][fg]overlay=(W-w)/2:(H-h)/2[base]"
             if ass_subtitle_path and os.path.isfile(ass_subtitle_path):
-                escaped_sub = ass_subtitle_path.replace(":", "\\:").replace("'", "\\'")
-                sub_filter = f";[base]ass='{escaped_sub}'[v]"
+                escaped_sub = cls._escape_ffmpeg_ass_path(ass_subtitle_path)
+                sub_filter = f";[base]ass={escaped_sub}[v]"
             else:
                 sub_filter = ";[base]copy[v]"
             return f"{bg_filter};{fg_filter};{overlay_filter}{sub_filter}"
 
-        # Apply subtle cinematic color grading and sharpness enhancement
+        filters = [
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase",
+            "setsar=1",
+            f"crop={target_w}:{target_h}",
+        ]
+
         if apply_enhancements:
             filters.append(VIDEO_FILTER_ENHANCE)
 
-        # Burn ASS subtitles if provided
         if ass_subtitle_path and os.path.isfile(ass_subtitle_path):
-            escaped_sub = ass_subtitle_path.replace(":", "\\:").replace("'", "\\'")
-            filters.append(f"ass='{escaped_sub}'")
+            escaped_sub = cls._escape_ffmpeg_ass_path(ass_subtitle_path)
+            filters.append(f"ass={escaped_sub}")
 
         return ",".join(filters)
 
@@ -333,7 +369,6 @@ class VideoRenderer:
         """
         Builds full FFmpeg command for rendering.
         """
-        preset = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["square"])
         cmd = ["ffmpeg", "-y", "-i", raw_input]
 
         if aspect_ratio == "vertical_blurred":
@@ -351,7 +386,6 @@ class VideoRenderer:
             )
             cmd.extend(["-vf", vf])
 
-        # Audio normalization (EBU R128)
         if normalize_audio:
             af = (
                 f"loudnorm=I={AUDIO_NORM_SETTINGS['integrated_lufs']}:"
@@ -360,7 +394,6 @@ class VideoRenderer:
             )
             cmd.extend(["-af", af])
 
-        # Video encoding settings for YouTube Shorts (H.264, 60fps capable, high compatibility)
         cmd.extend([
             "-c:v", "libx264",
             "-preset", "veryfast",

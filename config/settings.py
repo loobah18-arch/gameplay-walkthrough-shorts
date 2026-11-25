@@ -103,7 +103,7 @@ PAYOFF_KEYWORDS: Dict[str, list] = {
         "i'm alive", "we are alive", "not this time",
         "you don't own me", "who i am", "i feel alive", "there is no choice",
         "see you around", "have a nice life", "i'm done", "we're done",
-        "it ends here", "rest in peace", "welcome to", "not today",
+        "it ends here", "rest in peace", "not today",
     ],
     "decision_or_climax": [
         "shoot", "pull the trigger", "don't shoot", "spare", "kill him",
@@ -114,7 +114,7 @@ PAYOFF_KEYWORDS: Dict[str, list] = {
         "let him go", "let her go", "finish it", "fight me", "no more",
     ],
     "revelation_or_truth": [
-        "the truth is", "i lied", "you lied to me", "i am", "you are",
+        "the truth is", "i lied", "you lied to me",
         "all along", "it was you", "i remember", "i know who i am",
         "you're not human", "you're one of us", "you're a deviant",
         "this is who i am", "i finally understand", "now i see",

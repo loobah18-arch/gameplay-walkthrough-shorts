@@ -7,7 +7,7 @@ Enforces Payoff-First Reverse Alignment: anchors Shorts to the climax consequenc
 import os
 import re
 import subprocess
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 
 
 class ActualPayoffDetector:
@@ -29,29 +29,32 @@ class ActualPayoffDetector:
 
         Aligns the Short window backwards so the climax and its aftermath occur in the final seconds.
         """
-        chapter_duration = chapter_end - chapter_start
+        if target_duration <= 0:
+            raise ValueError(f"target_duration must be > 0 (got {target_duration})")
+
+        c_start = float(chapter_start)
+        c_end = max(c_start, float(chapter_end))
+        chapter_duration = c_end - c_start
 
         if chapter_duration <= target_duration:
-            # If chapter is shorter than target, take the entire chapter
             return {
-                "start": round(chapter_start, 2),
-                "end": round(chapter_end, 2),
+                "start": round(c_start, 2),
+                "end": round(c_end, 2),
                 "duration": round(chapter_duration, 2),
-                "payoff_timestamp": round(chapter_end, 2),
+                "payoff_timestamp": round(c_end, 2),
                 "arc_phase": "full_chapter_resolution",
             }
 
-        # The resolution event concludes near the end of the chapter (before scene fade-out)
-        # Typically 2-5 seconds before the hard chapter end
-        end_time = min(chapter_end - 1.0, chapter_end)
-        start_time = max(chapter_start, end_time - target_duration)
-        actual_dur = end_time - start_time
+        # Leave a 1s fade guard when long chapters end cleanly on a transition
+        end_time = max(c_start, c_end - 1.0)
+        start_time = max(c_start, end_time - target_duration)
+        actual_dur = max(0.0, end_time - start_time)
 
         return {
             "start": round(start_time, 2),
             "end": round(end_time, 2),
             "duration": round(actual_dur, 2),
-            "payoff_timestamp": round(end_time - hold_after_resolution, 2),
+            "payoff_timestamp": round(max(start_time, end_time - hold_after_resolution), 2),
             "arc_phase": "climactic_resolution_zone",
         }
 
@@ -63,20 +66,22 @@ class ActualPayoffDetector:
         silence_min_duration: float = 0.8,
     ) -> List[Dict[str, Any]]:
         """
-        Scans audio track using FFmpeg astats/silencedetect to identify:
-        - Major volume peaks and transient impact events (gunshot, impact, explosion)
+        Scans audio track (`-vn`, audio-only) using FFmpeg astats + silencedetect to identify:
+        - Major RMS/peak loudness bursts preceding dramatic silences (gunshot, impact, shout)
         - Trailing dramatic silence (tension drop / scene transition)
-        Returns ranked list of candidate payoff timestamps.
+        Returns candidate payoff timestamps ranked by impact score descending.
         """
         if not os.path.isfile(media_path):
             return []
 
-        # Run silencedetect to find dramatic pauses and scene ends
         cmd = [
             "ffmpeg",
             "-hide_banner",
+            "-vn",
+            "-sn",
+            "-dn",
             "-i", media_path,
-            "-af", f"silencedetect=noise={silence_threshold_db}dB:d={silence_min_duration}",
+            "-af", f"astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.Peak_level,silencedetect=noise={silence_threshold_db}dB:d={silence_min_duration}",
             "-f", "null",
             "-",
         ]
@@ -85,18 +90,47 @@ class ActualPayoffDetector:
             res = subprocess.run(cmd, capture_output=True, text=True, check=False)
             output = res.stderr
 
+            # Collect 1-second peak dB samples
+            peak_points: List[tuple] = []
+            cur_pts = None
+            for line in output.splitlines():
+                m_pts = re.search(r"pts_time:([\d\.]+)", line)
+                if m_pts:
+                    cur_pts = float(m_pts.group(1))
+                elif cur_pts is not None:
+                    m_peak = re.search(r"lavfi\.astats\.Overall\.Peak_level=([-\d\.inf]+)", line)
+                    if m_peak and "inf" not in m_peak.group(1).lower():
+                        peak_points.append((cur_pts, float(m_peak.group(1))))
+                        cur_pts = None
+
             silence_starts = [
-                float(m.group(1)) + start_offset
+                float(m.group(1))
                 for m in re.finditer(r"silence_start:\s*([\d\.]+)", output)
             ]
 
             events = []
             for s in silence_starts:
+                # Evaluate peak energy in the 3s leading directly into the silence
+                recent_peaks = [p for t, p in peak_points if (s - 3.0) <= t <= s]
+                max_pre_peak = max(recent_peaks) if recent_peaks else -25.0
+                if max_pre_peak >= -12.0:
+                    score = 9.5
+                    etype = "climax_impact_drop"
+                elif max_pre_peak >= -20.0:
+                    score = 8.0
+                    etype = "audio_drop_resolution"
+                else:
+                    score = 5.5
+                    etype = "ambient_pause"
+
                 events.append({
-                    "timestamp": round(s, 2),
-                    "type": "audio_drop_resolution",
-                    "score": 8.0,
+                    "timestamp": round(s + start_offset, 2),
+                    "type": etype,
+                    "pre_peak_db": round(max_pre_peak, 2),
+                    "score": score,
                 })
+
+            events.sort(key=lambda e: (e["score"], e["timestamp"]), reverse=True)
             return events
         except Exception:
             return []
@@ -112,11 +146,15 @@ class ActualPayoffDetector:
         Reverse-aligns a Short window around an actual payoff climax.
         The Short ends `aftermath_hold` seconds after the climax to let the impact land.
         """
-        end_time = climax_timestamp + aftermath_hold
-        start_time = max(min_start, end_time - target_duration)
+        if target_duration <= 0:
+            raise ValueError(f"target_duration must be > 0 (got {target_duration})")
+
+        floor = max(0.0, float(min_start))
+        end_time = max(floor, float(climax_timestamp) + float(aftermath_hold))
+        start_time = max(floor, end_time - float(target_duration))
         return {
             "start": round(start_time, 2),
             "end": round(end_time, 2),
-            "duration": round(end_time - start_time, 2),
-            "climax_at": round(climax_timestamp, 2),
+            "duration": round(max(0.0, end_time - start_time), 2),
+            "climax_at": round(float(climax_timestamp), 2),
         }

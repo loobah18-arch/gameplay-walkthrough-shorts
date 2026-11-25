@@ -1,4 +1,7 @@
+import json
+import subprocess
 import unittest
+from unittest.mock import patch, MagicMock
 from core.walkthrough_fetcher import WalkthroughFetcher
 
 
@@ -32,6 +35,37 @@ I am just a machine, not a living being.
         self.assertIn("Are you afraid of death?", cues[0]["text"])
         self.assertEqual(cues[1]["text"], "Machines don't feel anything.")
         self.assertEqual(cues[2]["text"], "I am just a machine, not a living being.")
+
+    def test_parse_vtt_crlf_entities_note_and_cue_ids(self):
+        sample_vtt = (
+            "WEBVTT\r\n\r\n"
+            "NOTE comment with --> arrow should be ignored\r\n\r\n"
+            "cue-1\r\n"
+            "0:01:02.500 --> 0:01:05.000 align:start\r\n"
+            "I don&#39;t care &amp; I won&apos;t stop!\r\n\r\n"
+            "0:01:05.000 --> 0:01:05.010\r\n"
+            "I won't stop!\r\n"
+        )
+        cues = WalkthroughFetcher.parse_vtt_content(sample_vtt)
+        self.assertEqual(len(cues), 1)
+        self.assertEqual(cues[0]["start"], 62.5)
+        self.assertEqual(cues[0]["text"], "I don't care & I won't stop!")
+
+    @patch("core.walkthrough_fetcher.CookieManager.get_ytdlp_cookie_args", return_value=["--cookies", "c.txt"])
+    @patch("core.walkthrough_fetcher.subprocess.run")
+    def test_fetch_video_info_preserves_proxy_on_fallback_and_null_duration(self, mock_run, _mock_cookies):
+        payload = json.dumps({"id": "vid123", "title": "Test", "duration": None, "formats": []})
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(1, "yt-dlp"),
+            MagicMock(stdout=payload, returncode=0),
+        ]
+        fetcher = WalkthroughFetcher()
+        info = fetcher.fetch_video_info("https://youtube.com/watch?v=vid123", proxy="http://proxy:8080")
+        self.assertEqual(info["duration"], 0)
+        fallback_cmd = mock_run.call_args_list[1].args[0]
+        self.assertIn("--no-cookies", fallback_cmd)
+        self.assertIn("--proxy", fallback_cmd)
+        self.assertIn("http://proxy:8080", fallback_cmd)
 
 
 if __name__ == "__main__":

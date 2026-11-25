@@ -19,9 +19,14 @@ class CutsceneAnalyzer:
     ):
         self.keywords = [k.lower() for k in (keywords or DRAMATIC_KEYWORDS)]
         self.payoff_keywords = payoff_keywords or PAYOFF_KEYWORDS
-        self.unfinished_trails = set(
+        self.unfinished_trails = {
             w.lower() for w in (unfinished_trails or UNFINISHED_SENTENCE_TRAILS)
-        )
+        }
+
+    @staticmethod
+    def _contains_phrase(text_lower: str, phrase: str) -> bool:
+        """Matches keyword/phrase on word boundaries so substrings inside words never match."""
+        return bool(re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text_lower))
 
     def check_incomplete_ending(self, text: str) -> bool:
         """
@@ -40,9 +45,8 @@ class CutsceneAnalyzer:
             return True
 
         # Strip ending quotes or brackets for word-level inspection
-        stripped = re.sub(r'["\'\)\]\}]+$', '', cleaned).rstrip()
+        stripped = re.sub(r'["\'”’\)\]]+$', "", cleaned).rstrip()
 
-        # Find words
         words = re.findall(r"\b[a-zA-Z']+\b", stripped.lower())
         if not words:
             return True
@@ -57,8 +61,8 @@ class CutsceneAnalyzer:
             if two_word_tail in {"going to", "want to", "as if", "such as", "kind of", "sort of", "out of"}:
                 return True
 
-        # If text lacks any terminal punctuation (. ! ?), auxiliary verbs and dangling pronouns indicate an incomplete clause
-        has_terminal_punct = bool(re.search(r'[.!?]["\'”’]?$', cleaned))
+        # If text lacks terminal punctuation (. ! ?), auxiliary verbs and pronouns indicate an incomplete clause
+        has_terminal_punct = bool(re.search(r'[.!?]["\'”’\)\]]*$', cleaned))
         if not has_terminal_punct:
             if last_word in {
                 "don't", "didn't", "can't", "won't", "couldn't", "wouldn't", "shouldn't",
@@ -82,21 +86,17 @@ class CutsceneAnalyzer:
         score = 0.0
         lower = text.lower()
 
-        # Questions create powerful curiosity loops
         if "?" in text:
             score += 3.5
 
-        # Exclamations create immediate urgency
         if "!" in text:
             score += 2.0
 
-        # Dramatic keywords in the hook
         for kw in self.keywords:
-            if kw in lower:
+            if self._contains_phrase(lower, kw):
                 score += 3.0
                 break
 
-        # Dialogue density / length
         word_count = len(re.findall(r"\w+", text))
         if 4 <= word_count <= 20:
             score += 1.5
@@ -118,7 +118,7 @@ class CutsceneAnalyzer:
         Rejects unfinished sentences, mid-clause cuts, or trailing conjunctions.
         """
         text = cue.get("text", "").strip()
-        result = {
+        result: Dict[str, Any] = {
             "has_payoff": False,
             "score": 0.0,
             "payoff_type": "none",
@@ -142,16 +142,17 @@ class CutsceneAnalyzer:
         pause_duration = 3.0
         if next_cue:
             pause_duration = max(0.0, next_cue["start"] - cue["end"])
-            # If the pause is almost zero and next cue starts lowercase, it's mid-sentence subtitle chunking
             if pause_duration < 0.35:
                 next_words = next_cue.get("text", "").strip().split()
-                if next_words and (next_words[0][0].islower() or next_words[0].lower() in self.unfinished_trails):
-                    result["is_incomplete"] = True
-                    result["payoff_type"] = "mid_sentence_split"
-                    return result
+                if next_words:
+                    head = next_words[0].lstrip("\"'(-[“‘")
+                    if (head and head[0].islower()) or head.lower() in self.unfinished_trails:
+                        result["is_incomplete"] = True
+                        result["payoff_type"] = "mid_sentence_split"
+                        return result
         result["pause_after"] = round(pause_duration, 2)
 
-        # 3. Keyword-based payoff classification
+        # 3. Word-boundary keyword payoff classification
         lower = text.lower()
         base_score = 0.0
         matched_category = None
@@ -165,7 +166,7 @@ class CutsceneAnalyzer:
 
         for cat, kws in self.payoff_keywords.items():
             for kw in kws:
-                if kw in lower:
+                if self._contains_phrase(lower, kw):
                     matched_category = cat
                     matched_kw = kw
                     base_score = category_weights.get(cat, 6.0)
@@ -173,30 +174,31 @@ class CutsceneAnalyzer:
             if matched_category:
                 break
 
-        # 4. Terminal punctuation and conclusive phrasing bonus
-        if text.endswith("!"):
+        # 4. Terminal punctuation (handling trailing quotes/parens)
+        punct_match = re.search(r'([.!?])["\'”’\)\]]*$', text)
+        terminal_punct = punct_match.group(1) if punct_match else ""
+        if terminal_punct == "!":
             base_score += 2.5
-        elif text.endswith("."):
+        elif terminal_punct == ".":
             base_score += 2.0
-        elif text.endswith("?"):
+        elif terminal_punct == "?":
             base_score += 1.5
 
         # 5. Dramatic beat / lingering silence bonus
         if pause_duration >= 1.5:
-            base_score += 3.5  # Scene transition or cinematic silence
+            base_score += 3.5
         elif pause_duration >= 0.8:
-            base_score += 2.0  # Natural dramatic pause
+            base_score += 2.0
         elif pause_duration < 0.4 and next_cue:
-            base_score -= 1.0  # Fast back-and-forth
+            base_score -= 1.0
 
         # 6. Evaluation threshold
-        # If keyword matched, or if strong conclusive line with dramatic pause (score >= 4.0)
         if matched_category:
             result["has_payoff"] = True
             result["score"] = round(base_score, 2)
             result["payoff_type"] = matched_category
             result["matched_keyword"] = matched_kw
-        elif base_score >= 4.0 and (text.endswith((".", "!", "?"))):
+        elif base_score >= 4.0 and bool(terminal_punct):
             result["has_payoff"] = True
             result["score"] = round(base_score, 2)
             result["payoff_type"] = "definitive_closure"
@@ -214,12 +216,10 @@ class CutsceneAnalyzer:
         score = 0.0
         lower = text.lower()
 
-        # Keyword matching
         for kw in self.keywords:
-            if kw in lower:
+            if self._contains_phrase(lower, kw):
                 score += 3.5
 
-        # Punctuation indicators of tension and conflict
         if "?" in text:
             score += 1.5
         if "!" in text:
@@ -227,7 +227,6 @@ class CutsceneAnalyzer:
         if "..." in text:
             score += 1.0
 
-        # Word count bonus (dialogue presence vs silence)
         word_count = len(re.findall(r"\w+", text))
         if 5 <= word_count <= 25:
             score += 1.0
@@ -246,10 +245,13 @@ class CutsceneAnalyzer:
         """
         Scans cues with a sliding window to identify top cutscene segments.
         When require_payoff=True, strictly filters out candidates lacking a definitive climax,
-        punchline, or moral choice, and rejects incomplete mid-sentence endings.
+        punchline, or moral choice, and returns [] if none meet the threshold.
         """
         if not cues:
             return []
+
+        if min_duration > max_duration:
+            min_duration = max_duration
 
         segments = []
         n = len(cues)
@@ -274,12 +276,10 @@ class CutsceneAnalyzer:
                     next_cue = cues[j + 1] if (j + 1 < n) else None
                     payoff = self.score_payoff(cue, next_cue=next_cue)
 
-                    # Strict payoff filter: reject if no payoff, incomplete sentence, or weak payoff score
                     if require_payoff:
                         if not payoff["has_payoff"] or payoff["is_incomplete"] or payoff["score"] < min_payoff_score:
                             continue
 
-                    # Composite score: Hook (25%), Dialogue Tension Density (35%), Payoff (40%)
                     density = accumulated_body_score / max(1.0, dur / 30.0)
                     composite_score = (0.25 * hook_score) + (0.35 * density) + (0.40 * payoff["score"])
 
@@ -300,23 +300,17 @@ class CutsceneAnalyzer:
                     })
 
         if not segments:
-            # If strict payoff eliminated all segments, try relaxed pass if require_payoff was True
             if require_payoff:
-                return self.find_viral_segments(
-                    cues,
-                    target_duration=target_duration,
-                    min_duration=min_duration,
-                    max_duration=max_duration,
-                    require_payoff=False,
-                )
+                # Never silently bypass strict payoff enforcement
+                return []
 
-            # Fallback to first available window if no cues met threshold
             first_start = cues[0]["start"]
-            fallback_end = min(first_start + target_duration, cues[-1]["end"])
+            capped_target = min(target_duration, max_duration)
+            fallback_end = min(first_start + capped_target, cues[-1]["end"])
             return [{
                 "start": round(first_start, 2),
                 "end": round(fallback_end, 2),
-                "duration": round(fallback_end - first_start, 2),
+                "duration": round(max(0.0, fallback_end - first_start), 2),
                 "score": 10.0,
                 "hook_score": 0.0,
                 "payoff_score": 0.0,
@@ -329,10 +323,8 @@ class CutsceneAnalyzer:
                 "closing_dialogue": cues[-1]["text"],
             }]
 
-        # Sort by composite score descending
         segments.sort(key=lambda x: x["score"], reverse=True)
 
-        # Deduplicate overlapping segments (keep non-overlapping top picks)
         non_overlapping = []
         for cand in segments:
             overlap = False
@@ -354,10 +346,9 @@ class CutsceneAnalyzer:
         """
         Creates an engaging, click-worthy title formatted like viral game cutscenes.
         Incorporates payoff or key phrase.
-        Example: "Connor: Just a Machine or Living Being? | Detroit: Become Human"
         """
         phrase = payoff_phrase if (payoff_phrase and len(payoff_phrase) >= 10) else key_phrase
-        clean_phrase = phrase.strip().strip(".!?,")
+        clean_phrase = phrase.strip().strip(".!?,\"'")
         if len(clean_phrase) > 55:
             clean_phrase = clean_phrase[:52] + "..."
 

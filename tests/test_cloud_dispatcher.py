@@ -18,13 +18,20 @@ class TestCloudDispatcher(unittest.TestCase):
         self.assertEqual(spec["aspect_ratio"], "square")
         self.assertEqual(spec["title"], "Connor Deviancy Test")
 
-    def test_get_dispatch_command(self):
+    def test_invalid_time_range_raises(self):
+        dispatcher = CloudDispatcher()
+        with self.assertRaises(ValueError):
+            dispatcher.generate_clip_spec("https://youtube.com/watch?v=abcde", 50.0, 20.0, "Bad")
+        with self.assertRaises(ValueError):
+            dispatcher.generate_clip_spec("https://youtube.com/watch?v=abcde", -5.0, 20.0, "Neg")
+
+    def test_get_dispatch_command_escapes_shell_metachars(self):
         dispatcher = CloudDispatcher(repo="loobah18-arch/gameplay-walkthrough-shorts")
         spec = dispatcher.generate_clip_spec(
             video_url="https://youtube.com/watch?v=abcde",
             start_time=60.0,
             end_time=115.0,
-            title="Connor Test",
+            title='Connor said "$(whoami)" `id`',
             game_name="Detroit",
             aspect_ratio="square",
         )
@@ -32,6 +39,9 @@ class TestCloudDispatcher(unittest.TestCase):
         self.assertIn("gh workflow run", cmd)
         self.assertIn("--repo loobah18-arch/gameplay-walkthrough-shorts", cmd)
         self.assertIn('-f aspect_ratio="square"', cmd)
+        self.assertIn('\\$(whoami)', cmd)
+        self.assertIn('\\`id\\`', cmd)
+        self.assertIn('\\"', cmd)
 
     def test_dispatch_dry_run(self):
         dispatcher = CloudDispatcher()
