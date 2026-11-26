@@ -489,33 +489,50 @@ def cmd_daily_job(args):
         sys.exit(0)
 
     crawler = WalkthroughCrawler()
-    candidates = crawler.list_candidates(
-        preferred_game=args.game if args.game else None,
-        proxy=args.proxy,
-        cookies_path=args.cookies,
-        max_candidates=10,
-    )
-    if not candidates:
-        raise RuntimeError("No unclipped walkthrough candidates discovered.")
+    games_dict = crawler.catalog.get("games", {})
+    all_game_keys = list(games_dict.keys())
+    if not all_game_keys:
+        raise RuntimeError("No games found in catalog.")
+
+    if args.game and args.game in games_dict:
+        target_game_keys = [args.game]
+    else:
+        history = crawler.get_clipped_history()
+        idx = len(history.get("entries", [])) % len(all_game_keys)
+        target_game_keys = [all_game_keys[idx]] + [g for i, g in enumerate(all_game_keys) if i != idx]
 
     fetcher = WalkthroughFetcher()
     analyzer = CutsceneAnalyzer()
 
     selected = None
     chosen_candidate = None
-    for candidate in candidates:
-        print(f"🎯 Inspecting Candidate: {candidate['title']} ({candidate['url']})")
-        picked = _select_verified_cutscene(
-            candidate=candidate,
-            fetcher=fetcher,
-            analyzer=analyzer,
-            crawler=crawler,
-            cookies_path=args.cookies,
+
+    for g_key in target_game_keys:
+        candidates = crawler.list_candidates(
+            preferred_game=g_key,
             proxy=args.proxy,
+            cookies_path=args.cookies,
+            max_candidates=10,
         )
-        if picked:
-            selected = picked
-            chosen_candidate = candidate
+        if not candidates:
+            continue
+
+        for candidate in candidates:
+            print(f"🎯 Inspecting Candidate: {candidate['title']} ({candidate['url']})")
+            picked = _select_verified_cutscene(
+                candidate=candidate,
+                fetcher=fetcher,
+                analyzer=analyzer,
+                crawler=crawler,
+                cookies_path=args.cookies,
+                proxy=args.proxy,
+            )
+            if picked:
+                selected = picked
+                chosen_candidate = candidate
+                break
+
+        if selected and chosen_candidate:
             break
 
     if not selected or not chosen_candidate:

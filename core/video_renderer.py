@@ -199,19 +199,21 @@ class VideoRenderer:
                     print(f"✅ [Tier 1] Successfully downloaded clip via Proxy: {found}")
                     return found
 
-        # Tier 2: PO Token + bgutil Docker service (web,mweb with cookies)
+        # Tier 2: PO Token + bgutil Docker service (web,mweb)
         # Uses local bgutil container on :4416 if healthy to generate fresh gvs PO tokens
-        if cookies_path and os.path.isfile(cookies_path):
-            print("🎟️ [Tier 2] Trying PO Token + cookies with bgutil service (web,mweb)...")
+        print("🎟️ [Tier 2] Trying PO Token with bgutil service (web,mweb)...")
+        cookie_options = [True, False] if (cookies_path and os.path.isfile(cookies_path)) else [False]
+        for use_c in cookie_options:
+            c_path = cookies_path if use_c else None
             cmd2 = cls.build_ytdlp_download_cmd(
                 video_url=video_url,
                 start_time=start_time,
                 end_time=end_time,
                 output_filepath=output_filepath,
-                cookies_path=cookies_path,
+                cookies_path=c_path,
                 proxy=proxy,
                 client_override="web,mweb",
-                use_cookies=True,
+                use_cookies=use_c,
                 po_token=po_token,
                 visitor_data=visitor_data,
                 format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
@@ -220,12 +222,12 @@ class VideoRenderer:
             if run_ytdlp(cmd2):
                 found = cls.find_existing_media_file(output_filepath)
                 if found:
-                    print(f"✅ [Tier 2] PO Token section download succeeded: {found}")
+                    print(f"✅ [Tier 2] PO Token section download succeeded (cookies={use_c}): {found}")
                     return found
 
             # Tier 2b: Native full-file download with web/mweb (no --download-sections)
             # Avoids FFmpeg HTTP range 403 Forbidden errors
-            print("🛡️ [Tier 2b] Trying native full-file download with PO token (web,mweb)...")
+            print(f"🛡️ [Tier 2b] Trying native full-file download with PO token (web,mweb, cookies={use_c})...")
             temp_full2 = os.path.join(
                 os.path.dirname(os.path.abspath(output_filepath)),
                 f"full_src_pot_{uuid.uuid4().hex[:8]}.mp4",
@@ -235,10 +237,10 @@ class VideoRenderer:
                 start_time=None,
                 end_time=None,
                 output_filepath=temp_full2,
-                cookies_path=cookies_path,
+                cookies_path=c_path,
                 proxy=proxy,
                 client_override="web,mweb",
-                use_cookies=True,
+                use_cookies=use_c,
                 po_token=po_token,
                 visitor_data=visitor_data,
                 format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",

@@ -40,14 +40,15 @@ class WalkthroughFetcher:
             "-4",
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
-            "--extractor-args", "youtube:player_client=android",
+            "--extractor-args", "youtube:player_client=ios,android_vr,mweb,web",
+            "--ignore-no-formats-error",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
             "--socket-timeout", "45",
         ]
         proxy_args = self.get_proxy_args(proxy)
-        # Primary attempt: Android player client without cookies (bypasses bot verification in datacenter IPs)
+        # Primary attempt: Public multi-client without cookies (uses bgutil :4416 if present, bypasses bot blocks)
         cmd = [*base_cmd, "--no-cookies", *proxy_args, url]
 
         res = None
@@ -68,6 +69,7 @@ class WalkthroughFetcher:
                 "--js-runtimes", "node",
                 "--remote-components", "ejs:github",
                 "--extractor-args", "youtube:player_client=web,mweb",
+                "--ignore-no-formats-error",
                 "--dump-json",
                 "--skip-download",
                 "--no-playlist",
