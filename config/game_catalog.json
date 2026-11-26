@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "description": "Curated Story Games & High-Quality Walkthrough Channels for Cutscene Shorts",
-  "default_aspect_ratio": "square",
+  "default_aspect_ratio": "vertical_letterbox",
   "curated_channels": [
     {
       "name": "MKIceAndFire",

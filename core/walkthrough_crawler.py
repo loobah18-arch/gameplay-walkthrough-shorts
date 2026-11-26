@@ -163,28 +163,28 @@ class WalkthroughCrawler:
             log(f"Warning: Search failed for '{query}': {e}")
         return results
 
-    def select_next_walkthrough(
+    def list_candidates(
         self,
         preferred_game: Optional[str] = None,
         proxy: Optional[str] = None,
         cookies_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        max_candidates: int = 10,
+    ) -> List[Dict[str, Any]]:
         """
-        Selects the next unclipped walkthrough candidate across the catalog games.
-        Ensures zero duplicate videos, strictly >= 180s, prioritizing cutscenes.
+        Returns ranked unclipped long-form candidates across the target game's search queries
+        and RSS fallback so the caller can verify cutscene chapters / dialogue payoffs and
+        reject videos that lack a verified cutscene climax.
         """
         games = self.catalog.get("games", {})
         game_keys = list(games.keys())
         if not game_keys:
             raise RuntimeError("No games found in catalog.")
 
-        # Determine rotation order
         history = self.get_clipped_history()
         clipped_ids = set(history.get("clipped_video_ids", []))
 
         selected_game_key = preferred_game if preferred_game in games else None
         if not selected_game_key:
-            # Rotate based on history length
             idx = len(history.get("entries", [])) % len(game_keys)
             selected_game_key = game_keys[idx]
 
@@ -192,7 +192,10 @@ class WalkthroughCrawler:
         game_name = game_data.get("name", selected_game_key)
         queries = game_data.get("search_queries", [f"{game_name} All Cutscenes 4K"])
 
-        log(f"Selecting unclipped walkthrough for game: '{game_name}'")
+        log(f"Discovering unclipped cutscene candidates for game: '{game_name}'")
+        collected: List[Dict[str, Any]] = []
+        seen_ids: Set[str] = set()
+
         for query in queries:
             candidates = self.search_game_walkthroughs(
                 query=query,
@@ -202,30 +205,39 @@ class WalkthroughCrawler:
             )
             for cand in candidates:
                 vid = cand["video_id"]
-                if vid not in clipped_ids:
-                    log(f"✅ Found unclipped long-form candidate: '{cand['title']}' ({vid}) [{cand['duration']}s]")
-                    return {
-                        "game_key": selected_game_key,
-                        "game_name": game_name,
-                        "video_id": vid,
-                        "title": cand["title"],
-                        "url": cand["url"],
-                        "duration": cand["duration"],
-                        "chapters": cand.get("chapters", []),
-                    }
+                if vid in clipped_ids or vid in seen_ids:
+                    continue
+                seen_ids.add(vid)
+                collected.append({
+                    "game_key": selected_game_key,
+                    "game_name": game_name,
+                    "video_id": vid,
+                    "title": cand["title"],
+                    "url": cand["url"],
+                    "duration": cand["duration"],
+                    "chapters": cand.get("chapters", []),
+                })
+                if len(collected) >= max_candidates:
+                    return collected
 
-        # Fallback to direct channel RSS if search is rate limited
-        curated_channels = self.catalog.get("curated_channels", [])
-        for ch in curated_channels:
-            ch_id = ch.get("channel_id")
-            if not ch_id:
-                continue
-            uploads = self.fetch_channel_rss_uploads(ch_id)
-            for up in uploads:
-                vid = up["video_id"]
-                if vid not in clipped_ids:
-                    log(f"✅ Fallback to curated channel upload: '{up['title']}' ({vid})")
-                    return {
+        if not collected:
+            # Fallback to curated channels RSS only if search returned no usable items
+            curated_channels = self.catalog.get("curated_channels", [])
+            game_tokens = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", game_name) if len(w) > 2}
+            for ch in curated_channels:
+                ch_id = ch.get("channel_id")
+                if not ch_id:
+                    continue
+                for up in self.fetch_channel_rss_uploads(ch_id):
+                    vid = up["video_id"]
+                    title_lower = up["title"].lower()
+                    if vid in clipped_ids or vid in seen_ids or "#shorts" in title_lower:
+                        continue
+                    # Prefer uploads that mention the target game when falling back to general channels
+                    if game_tokens and not any(tok in title_lower for tok in game_tokens):
+                        continue
+                    seen_ids.add(vid)
+                    collected.append({
                         "game_key": selected_game_key,
                         "game_name": game_name,
                         "video_id": vid,
@@ -233,6 +245,27 @@ class WalkthroughCrawler:
                         "url": up["url"],
                         "duration": 0,
                         "chapters": [],
-                    }
+                    })
+                    if len(collected) >= max_candidates:
+                        return collected
 
-        raise RuntimeError(f"Could not find any unclipped walkthrough for '{game_name}'.")
+        return collected
+
+    def select_next_walkthrough(
+        self,
+        preferred_game: Optional[str] = None,
+        proxy: Optional[str] = None,
+        cookies_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Selects the top unclipped walkthrough candidate for the target game."""
+        candidates = self.list_candidates(
+            preferred_game=preferred_game,
+            proxy=proxy,
+            cookies_path=cookies_path,
+            max_candidates=5,
+        )
+        if not candidates:
+            raise RuntimeError("Could not find any unclipped walkthrough candidates.")
+        top = candidates[0]
+        log(f"✅ Selected unclipped candidate: '{top['title']}' ({top['video_id']}) [{top['duration']}s]")
+        return top

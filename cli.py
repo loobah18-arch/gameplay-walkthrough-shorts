@@ -418,6 +418,64 @@ def cmd_render_cloud_job(args):
         )
 
 
+def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_path=None, proxy=None):
+    """
+    Validates that a walkthrough candidate is >= 180s and contains either a verified
+    cutscene chapter or dense cutscene dialogue with a real payoff climax.
+    Returns None instead of guessing an arbitrary timestamp window.
+    """
+    vid_url = candidate["url"]
+    vid_id = candidate["video_id"]
+    game_name = candidate["game_name"]
+
+    info = fetcher.fetch_video_info(vid_url, cookies_path=cookies_path, proxy=proxy)
+    duration = info.get("duration") or candidate.get("duration") or 0
+    if duration < 180:
+        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
+        return None
+
+    chapters = info.get("chapters") or candidate.get("chapters") or []
+    eligible_chapters = []
+    for chap in chapters:
+        c_title = chap.get("title", "")
+        affinity = CutsceneAnalyzer.score_chapter_cutscene_affinity(c_title)
+        if affinity < 0:
+            continue
+        dur = (chap.get("end_time") or 0) - (chap.get("start_time") or 0)
+        if dur >= 25 and not crawler.is_previously_clipped(vid_id, c_title):
+            eligible_chapters.append((chap, affinity))
+
+    if eligible_chapters:
+        eligible_chapters.sort(key=lambda x: x[1], reverse=True)
+        best_chap, _ = eligible_chapters[0]
+        window = ActualPayoffDetector.calculate_chapter_payoff_window(
+            chapter_start=best_chap["start_time"],
+            chapter_end=best_chap["end_time"],
+            target_duration=55.0,
+        )
+        scene_title = best_chap.get("title", candidate["title"])
+        print(f"🎬 Selected Cutscene Chapter: '{scene_title}' ({window['start']}s -> {window['end']}s)")
+        return {"start": window["start"], "end": window["end"], "scene_title": scene_title}
+
+    try:
+        cues = fetcher.fetch_transcript(vid_url, video_id=vid_id, cookies_path=cookies_path, proxy=proxy)
+    except Exception as exc:
+        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): no chapters and transcript unavailable ({exc}).")
+        return None
+
+    segments = analyzer.find_viral_segments(cues, min_duration=25, max_duration=58, require_payoff=True)
+    for seg in segments:
+        scene_title = analyzer.generate_short_title(
+            game_name, seg["sample_dialogue"], payoff_phrase=seg.get("payoff_line")
+        )
+        if not crawler.is_previously_clipped(vid_id, scene_title):
+            print(f"🎬 Selected Dialogue Cutscene Climax: '{scene_title}' ({seg['start']}s -> {seg['end']}s)")
+            return {"start": seg["start"], "end": seg["end"], "scene_title": scene_title}
+
+    print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): no verified cutscene chapters or payoff dialogue found.")
+    return None
+
+
 def cmd_daily_job(args):
     """Autonomous 24-hour cloud runner entrypoint."""
     from core.preflight_gate import check_preflight_gate
@@ -426,73 +484,53 @@ def cmd_daily_job(args):
         sys.exit(0)
 
     crawler = WalkthroughCrawler()
-    candidate = crawler.select_next_walkthrough(
+    candidates = crawler.list_candidates(
         preferred_game=args.game if args.game else None,
         proxy=args.proxy,
         cookies_path=args.cookies,
+        max_candidates=10,
     )
-
-    vid_url = candidate["url"]
-    game_name = candidate["game_name"]
-    vid_id = candidate["video_id"]
-    print(f"🎯 Selected Walkthrough Candidate: {candidate['title']} ({vid_url})")
+    if not candidates:
+        raise RuntimeError("No unclipped walkthrough candidates discovered.")
 
     fetcher = WalkthroughFetcher()
-    info = fetcher.fetch_video_info(vid_url, cookies_path=args.cookies, proxy=args.proxy)
-    chapters = info.get("chapters") or candidate.get("chapters") or []
+    analyzer = CutsceneAnalyzer()
 
-    # 1. Look for chapters with cutscene affinity, strictly excluding gameplay
-    eligible_chapters = []
-    for chap in chapters:
-        c_title = chap.get("title", "")
-        affinity = CutsceneAnalyzer.score_chapter_cutscene_affinity(c_title)
-        if affinity < 0:
-            continue  # Pure gameplay / free roam rejected
-        dur = (chap.get("end_time") or 0) - (chap.get("start_time") or 0)
-        if dur >= 25:
-            eligible_chapters.append((chap, affinity))
-
-    eligible_chapters.sort(key=lambda x: x[1], reverse=True)
-
-    start_sec = 0.0
-    end_sec = 55.0
-    scene_title = candidate["title"]
-
-    if eligible_chapters:
-        best_chap, _ = eligible_chapters[0]
-        window = ActualPayoffDetector.calculate_chapter_payoff_window(
-            chapter_start=best_chap["start_time"],
-            chapter_end=best_chap["end_time"],
-            target_duration=55.0,
+    selected = None
+    chosen_candidate = None
+    for candidate in candidates:
+        print(f"🎯 Inspecting Candidate: {candidate['title']} ({candidate['url']})")
+        picked = _select_verified_cutscene(
+            candidate=candidate,
+            fetcher=fetcher,
+            analyzer=analyzer,
+            crawler=crawler,
+            cookies_path=args.cookies,
+            proxy=args.proxy,
         )
-        start_sec = window["start"]
-        end_sec = window["end"]
-        scene_title = best_chap.get("title", scene_title)
-        print(f"🎬 Selected Cutscene Chapter: '{scene_title}' ({start_sec}s -> {end_sec}s)")
-    else:
-        # Scan transcript for dense character dialogue with decisive payoff
-        cues = fetcher.fetch_transcript(vid_url, video_id=vid_id, cookies_path=args.cookies, proxy=args.proxy)
-        analyzer = CutsceneAnalyzer()
-        segments = analyzer.find_viral_segments(cues, min_duration=25, max_duration=58, require_payoff=True)
-        if segments:
-            best_seg = segments[0]
-            start_sec = best_seg["start"]
-            end_sec = best_seg["end"]
-            scene_title = analyzer.generate_short_title(game_name, best_seg["sample_dialogue"], payoff_phrase=best_seg.get("payoff_line"))
-            print(f"🎬 Selected Dialogue Cutscene Climax: '{scene_title}' ({start_sec}s -> {end_sec}s)")
-        else:
-            print("⚠️ No strict cutscene payoff found. Falling back to default window.")
-            start_sec = 60.0
-            end_sec = 115.0
+        if picked:
+            selected = picked
+            chosen_candidate = candidate
+            break
 
-    # Build AniDoc-style top engaging question
+    if not selected or not chosen_candidate:
+        print("❌ No candidate walkthrough contained a verified cutscene chapter or dialogue payoff. Aborting.")
+        sys.exit(1)
+
+    vid_url = chosen_candidate["url"]
+    game_name = chosen_candidate["game_name"]
+    start_sec = selected["start"]
+    end_sec = selected["end"]
+    scene_title = selected["scene_title"]
+
+    # Build top engaging question
     qm = QuestionManager()
     top_question = qm.generate_question(
-        game_key=candidate.get("game_key", "game"),
+        game_key=chosen_candidate.get("game_key", "game"),
         game_name=game_name,
         cutscene_title=scene_title,
     )
-    print(f"💡 AniDoc Top Engaging Question: \"{top_question}\"")
+    print(f"💡 Top Engaging Question: \"{top_question}\"")
 
     render_args = argparse.Namespace(
         url=vid_url,
