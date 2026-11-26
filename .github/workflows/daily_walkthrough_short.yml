@@ -26,6 +26,11 @@ on:
         required: false
         default: false
         type: boolean
+      publish_to_youtube:
+        description: 'Publish rendered Short to YouTube (default: false)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -201,9 +206,15 @@ jobs:
             FORCE_ARG=(--force)
           fi
 
+          UPLOAD_ARG=(--no-upload)
+          if [ "${{ inputs.publish_to_youtube }}" = "true" ]; then
+            UPLOAD_ARG=(--upload)
+          fi
+
           python3 cli.py daily-job \
             "${GAME_ARG[@]}" \
             "${FORCE_ARG[@]}" \
+            "${UPLOAD_ARG[@]}" \
             "${COOKIE_ARGS[@]}" \
             "${POT_ARGS[@]}"
 

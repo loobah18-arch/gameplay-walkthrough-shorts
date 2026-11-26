@@ -568,7 +568,7 @@ def cmd_daily_job(args):
                 top_question=top_question,
                 game=game_name,
                 title=f"{scene_title} | {game_name}",
-                upload=True,
+                upload=getattr(args, "upload", False),
             )
 
             try:
@@ -657,6 +657,8 @@ def main():
     p_daily = subparsers.add_parser("daily-job", help="Autonomous 24-hour walkthrough cutscene clipper")
     p_daily.add_argument("--game", help="Optional game override (default: auto-rotate catalog)")
     p_daily.add_argument("--force", action="store_true", help="Bypass 24h pre-flight gate check")
+    p_daily.add_argument("--upload", action="store_true", default=False, help="Upload rendered Short to YouTube")
+    p_daily.add_argument("--no-upload", dest="upload", action="store_false", help="Skip YouTube upload (default)")
     p_daily.add_argument("--cookies", help="Path to cookies.txt")
     p_daily.add_argument("--proxy", help="HTTP/HTTPS/SOCKS5 proxy URL")
     p_daily.add_argument("--po-token", help="YouTube PO Token")
