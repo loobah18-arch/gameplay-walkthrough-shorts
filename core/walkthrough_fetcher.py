@@ -38,6 +38,7 @@ class WalkthroughFetcher:
         base_cmd = [
             "yt-dlp",
             "-4",
+            "--js-runtimes", "node",
             "--dump-json",
             "--skip-download",
             "--no-playlist",

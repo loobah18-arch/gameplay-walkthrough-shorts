@@ -124,6 +124,7 @@ class WalkthroughCrawler:
         cmd = [
             "yt-dlp",
             "-4",
+            "--js-runtimes", "node",
             "--flat-playlist",
             "--dump-json",
             "--skip-download",
