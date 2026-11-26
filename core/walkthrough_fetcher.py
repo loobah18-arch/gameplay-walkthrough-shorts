@@ -38,13 +38,10 @@ class WalkthroughFetcher:
         base_cmd = [
             "yt-dlp",
             "-4",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "--extractor-args", "youtube:player_client=android,web",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
-            "--socket-timeout", "25",
+            "--socket-timeout", "30",
         ]
         proxy_args = self.get_proxy_args(proxy)
         cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
@@ -52,22 +49,33 @@ class WalkthroughFetcher:
         cmd = [*base_cmd, *cookie_args, *proxy_args, url]
 
         res = None
+        stdout = ""
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        except subprocess.CalledProcessError:
+            stdout = (res.stdout or "").strip()
+        except subprocess.CalledProcessError as e:
+            res = e
+            stdout = (getattr(e, "stdout", "") or "").strip()
+
+        if not stdout and cookie_args:
             # Fallback without cookies while preserving proxy settings
             cmd_fallback = [*base_cmd, "--no-cookies", *proxy_args, url]
             try:
                 res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
-            except subprocess.CalledProcessError:
-                return {}
+                stdout = (res.stdout or "").strip()
+            except subprocess.CalledProcessError as e2:
+                res = e2
+                stdout = (getattr(e2, "stdout", "") or "").strip()
 
-        if not res or not res.stdout:
+        if not stdout:
+            err_msg = str(getattr(res, "stderr", "") or res or "").strip().replace("\n", " ")[:200]
+            print(f"⚠️ [fetch_video_info] Failed for {url}: {err_msg}")
             return {}
 
         try:
-            data = json.loads(res.stdout)
-        except Exception:
+            data = json.loads(stdout)
+        except Exception as e:
+            print(f"⚠️ [fetch_video_info] JSON decode error for {url}: {e}")
             return {}
 
         # Extract max available height and 60fps flag

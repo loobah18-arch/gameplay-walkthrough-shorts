@@ -87,7 +87,6 @@ class VideoRenderer:
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
             "--no-playlist",
             "--socket-timeout", "45",
         ]
