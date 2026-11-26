@@ -197,6 +197,11 @@ jobs:
             OUT_ARGS=(--output "$OUT_NAME")
           fi
 
+          UPLOAD_FLAG=()
+          if [ "$UPLOAD_TO_YT" = "true" ]; then
+            UPLOAD_FLAG=(--upload)
+          fi
+
           echo "🎮 Game: $GAME_NAME | Title: $CLIP_TITLE"
           python3 cli.py render-cloud-job \
             --url "$VIDEO_URL" \
@@ -209,7 +214,8 @@ jobs:
             "${COOKIE_ARGS[@]}" \
             "${POT_ARGS[@]}" \
             "${TOP_Q_ARG[@]}" \
-            "${OUT_ARGS[@]}"
+            "${OUT_ARGS[@]}" \
+            "${UPLOAD_FLAG[@]}"
 
       - name: 📦 Upload Generated Video Artifact
         if: always()

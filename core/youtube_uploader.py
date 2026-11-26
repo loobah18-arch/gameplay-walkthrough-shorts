@@ -15,6 +15,31 @@ from config.settings import ROOT_DIR
 UPLOAD_HISTORY_PATH = os.path.join(ROOT_DIR, "upload_history.json")
 
 
+def build_youtube_client():
+    """Builds an authenticated YouTube Data API v3 client from env secrets, or returns None."""
+    client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
+    refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "").strip()
+    if not (client_secret and refresh_token):
+        return None
+
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    creds_data = json.loads(client_secret) if client_secret.startswith("{") else {}
+    app_block = creds_data.get("installed") or creds_data.get("web") or {}
+    client_id = app_block.get("client_id") or os.environ.get("YOUTUBE_CLIENT_ID")
+    client_secret_val = app_block.get("client_secret") or client_secret
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret_val,
+    )
+    return build("youtube", "v3", credentials=creds)
+
+
 class YouTubeUploader:
     """Handles channel uploads and persists non-repeating upload history."""
 
@@ -110,22 +135,11 @@ class YouTubeUploader:
         print(f"🚀 Publishing Short to YouTube: '{title}'...")
         # Authenticated upload logic using google-api-python-client
         try:
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
             from googleapiclient.http import MediaFileUpload
 
-            creds_data = json.loads(client_secret) if client_secret.startswith("{") else {}
-            client_id = creds_data.get("installed", {}).get("client_id") or os.environ.get("YOUTUBE_CLIENT_ID")
-            client_secret_val = creds_data.get("installed", {}).get("client_secret") or client_secret
-
-            creds = Credentials(
-                token=None,
-                refresh_token=refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=client_id,
-                client_secret=client_secret_val,
-            )
-            youtube = build("youtube", "v3", credentials=creds)
+            youtube = build_youtube_client()
+            if youtube is None:
+                raise RuntimeError("Missing YouTube OAuth client credentials")
 
             # Algorithm-safe description with credit and high-CTR hashtags
             clean_game = re.sub(r"[^A-Za-z0-9]+", "", game_name).lower()

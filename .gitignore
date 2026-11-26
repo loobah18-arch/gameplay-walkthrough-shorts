@@ -18,11 +18,6 @@ temp/
 *.part
 *.ytdl
 
-# Allow sample assets
-!assets/samples/*.webm
-!assets/samples/*.mp4
-!assets/samples/*.mkv
-
 # Cookies and credentials
 cookies.txt
 youtube_cookies.txt

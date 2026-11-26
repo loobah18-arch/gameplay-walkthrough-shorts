@@ -9,7 +9,6 @@ import hashlib
 import math
 import os
 import re
-import shutil
 import sys
 from typing import Optional
 
@@ -323,25 +322,7 @@ def cmd_render_cloud_job(args):
         raw_output_name += ".mp4"
     output_filename = re.sub(r"[^A-Za-z0-9._-]", "_", raw_output_name)
 
-    # Check only URL-matched pre-staged sample assets so unrelated URLs are never hijacked
-    sample_candidates = [f"raw_clip_{vid_key}_{int(start_time)}"]
-    if vid_key == "BmXl1n3Trds" and int(start_time) == 5964:
-        sample_candidates.append(f"raw_clip_{int(start_time)}")
-
-    for stem in sample_candidates:
-        found_sample = False
-        for ext in [".webm", ".mp4", ".mkv"]:
-            sample_path = os.path.join("assets", "samples", f"{stem}{ext}")
-            if os.path.isfile(sample_path):
-                staged_dest = f"{temp_stem}{ext}"
-                if not os.path.isfile(staged_dest):
-                    shutil.copy(sample_path, staged_dest)
-                found_sample = True
-                break
-        if found_sample:
-            break
-
-    # 1. Check if raw clip was pre-staged for this URL, otherwise download via yt-dlp
+    # 1. Check if raw clip exists locally in temp/, otherwise download via yt-dlp
     actual_raw = VideoRenderer.find_existing_media_file(temp_raw)
     if not actual_raw:
         print(f"📥 Downloading section {start_time}s to {end_time}s for {vid_key}...")
@@ -411,17 +392,30 @@ def cmd_render_cloud_job(args):
     )
     print(f"🎉 Short successfully rendered: {final_path}")
 
-    # 5. Persist to upload history and upload if credentials exist
+    # 5. Persist to upload history and publish only when --upload is enabled
     uploader = YouTubeUploader()
-    uploader.publish_short(
-        video_path=final_path,
-        title=getattr(args, "title", raw_output_name),
-        game_name=game_name,
-        source_video_id=vid_key,
-        cutscene_title=raw_output_name,
-        top_question=top_question or "",
-        duration=clip_duration,
-    )
+    if getattr(args, "upload", False):
+        uploader.publish_short(
+            video_path=final_path,
+            title=getattr(args, "title", raw_output_name),
+            game_name=game_name,
+            source_video_id=vid_key,
+            cutscene_title=raw_output_name,
+            top_question=top_question or "",
+            duration=clip_duration,
+        )
+    else:
+        print("ℹ️ YouTube upload disabled (--no-upload). Artifact saved only.")
+        uploader.record_upload(
+            video_file=final_path,
+            title=getattr(args, "title", raw_output_name),
+            game_name=game_name,
+            source_video_id=vid_key,
+            cutscene_title=raw_output_name,
+            top_question=top_question or "",
+            published=False,
+            duration=clip_duration,
+        )
 
 
 def cmd_daily_job(args):
@@ -514,6 +508,7 @@ def cmd_daily_job(args):
         top_question=top_question,
         game=game_name,
         title=f"{scene_title} | {game_name}",
+        upload=True,
     )
     cmd_render_cloud_job(render_args)
 
@@ -581,6 +576,8 @@ def main():
     p_cloud.add_argument("--po-token", help="YouTube PO Token")
     p_cloud.add_argument("--visitor-data", help="YouTube Visitor Data")
     p_cloud.add_argument("--output", help="Output filename")
+    p_cloud.add_argument("--upload", action="store_true", default=False, help="Upload rendered Short to YouTube")
+    p_cloud.add_argument("--no-upload", dest="upload", action="store_false", help="Skip YouTube upload")
     p_cloud.set_defaults(func=cmd_render_cloud_job)
 
     # daily-job (autonomous 24-hour pipeline)

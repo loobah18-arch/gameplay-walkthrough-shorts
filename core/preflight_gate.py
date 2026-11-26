@@ -1,39 +1,33 @@
 #!/usr/bin/env python3
 """
-24-Hour Spacing Pre-flight Gate (Layer 0 front-runner for the Hypit pipeline).
+Algorithm Safety Pre-flight Gate (Layer 0, Layer 1 & Layer 2).
 
-Reuses candle_gate.CandleGate.evaluate_upload_spacing() so the workflow can
-skip the entire expensive pipeline (tests, TTS, PO token, 5-tier download,
-render) when fewer than 24 hours have elapsed since the last successful
-YouTube upload — instead of discovering that at the upload step.
-
-Decision matrix (fail-open by design, mirroring candle_gate.py):
-  - no history / no valid entries / parse error  -> proceed (fail-open)
-  - elapsed >= 24h                               -> proceed
-  - remaining <= 30 min                          -> inline sleep, then proceed
-  - otherwise                                    -> skip pipeline (proceed=false)
+Uses CandleGate to evaluate upload readiness cleanly with ZERO runner sleeping:
+  - Layer 0 (24h Spacing): blocks if < 24.0h elapsed since the last published upload.
+  - Layer 1 & Layer 2 (Live Channel Telemetry): when YouTube OAuth credentials exist,
+    blocks if the latest Short crossed >= 2k views in 24h or >= 2.5k views/hr velocity.
+  - Fail-open on missing history / unconfigured credentials so initial runs proceed.
 
 Manual workflow_dispatch runs set PREFLIGHT_BYPASS to always proceed.
-Exit code is always 0; the decision is carried via the `proceed` GitHub
-Actions output so downstream `if:` conditions stay simple.
+Exit code is always 0; `proceed` and `next_cron` are exported via GITHUB_OUTPUT.
 """
 
 import json
 import os
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 try:
     from core.candle_gate import CandleGate
+    from core.youtube_uploader import build_youtube_client
 except ImportError:
     from candle_gate import CandleGate
+    build_youtube_client = None
 
 DEFAULT_HISTORY = Path(__file__).resolve().parent.parent / "upload_history.json"
 DEFAULT_MIN_SPACING_HOURS = 24.0
-DEFAULT_MAX_INLINE_WAIT_HOURS = 0.5
-HARD_SLEEP_CAP_SECONDS = 1900  # defensive: below the preflight job's 45-min timeout
 
 
 def _parse_timestamp(raw: str) -> datetime:
@@ -46,17 +40,13 @@ def _parse_timestamp(raw: str) -> datetime:
     return dt
 
 
-def _last_valid_upload(records):
-    """Latest entry representing a real successful upload. Skips dry-run ids,
-    non-uploaded statuses, and entries without a usable timestamp (fail-open
-    direction: a stricter filter errs toward re-running, and the upload step's
-    candle gate still enforces Layer 0 anyway)."""
+def _last_valid_upload(records: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Returns the latest entry representing an actual published YouTube upload."""
     for rec in reversed(records if isinstance(records, list) else []):
         if not isinstance(rec, dict):
             continue
         vid = str(rec.get("video_id") or rec.get("youtube_id") or "")
         if not vid or vid.startswith("dry_run"):
-            # If not yet published to YouTube, still honor spacing if published flag is true or status is published
             if not rec.get("published", False) and rec.get("status") not in {"uploaded", "published"}:
                 continue
         elif rec.get("status") not in {"uploaded", "published"} and not rec.get("published", False):
@@ -69,55 +59,111 @@ def _last_valid_upload(records):
 
 
 def check_preflight_gate(history_file=DEFAULT_HISTORY, min_hours: float = DEFAULT_MIN_SPACING_HOURS) -> bool:
-    """Convenience wrapper returning boolean for callers like cli.py."""
+    """Convenience wrapper returning boolean for CLI callers."""
     res = decide(history_path=history_file, min_spacing_hours=min_hours)
     return bool(res.get("proceed", True))
 
 
 def decide(
     history_path=DEFAULT_HISTORY,
-    now=None,
+    now: Optional[datetime] = None,
     min_spacing_hours: float = DEFAULT_MIN_SPACING_HOURS,
-    max_inline_wait_hours: float = DEFAULT_MAX_INLINE_WAIT_HOURS,
-) -> dict:
-    """Pure decision function (no sleeping, no side effects) for testability."""
+    youtube_client=None,
+    state_file: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Pure zero-sleep decision function evaluating Layer 0 spacing and optional
+    Layer 1/2 live channel velocity.
+    """
     now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
 
     try:
         history = Path(history_path)
         records = json.loads(history.read_text(encoding="utf-8")) if history.exists() else []
     except Exception as exc:
-        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
-                "last_video_id": None, "reason": f"fail-open: unreadable history ({exc})"}
+        return {
+            "proceed": True,
+            "elapsed_hours": None,
+            "last_video_id": None,
+            "remaining_seconds": 0,
+            "due_at": "",
+            "next_cron": "0 * * * *",
+            "reason": f"fail-open: unreadable history ({exc})",
+        }
 
     rec, raw_ts = _last_valid_upload(records)
-    if rec is None:
-        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
-                "last_video_id": None, "reason": "no prior successful upload found; pipeline cleared"}
+    if rec is None or not raw_ts:
+        return {
+            "proceed": True,
+            "elapsed_hours": None,
+            "last_video_id": None,
+            "remaining_seconds": 0,
+            "due_at": "",
+            "next_cron": "0 * * * *",
+            "reason": "no prior published upload found; pipeline cleared",
+        }
 
     try:
         published_at = _parse_timestamp(raw_ts)
     except Exception as exc:
-        return {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
-                "last_video_id": rec.get("video_id"),
-                "reason": f"fail-open: unparseable timestamp {raw_ts!r} ({exc})"}
+        return {
+            "proceed": True,
+            "elapsed_hours": None,
+            "last_video_id": rec.get("video_id") or rec.get("youtube_id"),
+            "remaining_seconds": 0,
+            "due_at": "",
+            "next_cron": "0 * * * *",
+            "reason": f"fail-open: unparseable timestamp {raw_ts!r} ({exc})",
+        }
 
+    vid = rec.get("video_id") or rec.get("youtube_id")
     elapsed_hours = max((now - published_at).total_seconds() / 3600.0, 0.0)
-    spacing = CandleGate().evaluate_upload_spacing(
-        elapsed_hours, min_spacing_hours, max_inline_wait_hours
-    )
+    gate = CandleGate(state_file=Path(state_file)) if state_file else CandleGate()
 
-    base = {"elapsed_hours": round(elapsed_hours, 2), "last_video_id": rec.get("video_id")}
-    if spacing["can_upload"]:
-        return {**base, "proceed": True, "sleep_seconds": 0, "reason": spacing["recommendation"]}
-    if spacing["requires_spacing_sleep"]:
-        return {**base, "proceed": True,
-                "sleep_seconds": min(spacing["spacing_sleep_seconds"], HARD_SLEEP_CAP_SECONDS),
-                "reason": spacing["recommendation"]}
-    remaining = max(int(round((min_spacing_hours - elapsed_hours) * 3600)), 0)
-    due_at = published_at + timedelta(hours=min_spacing_hours)
-    return {**base, "proceed": False, "sleep_seconds": 0, "remaining_seconds": remaining,
-            "due_at": due_at.strftime("%Y-%m-%dT%H:%M:%SZ"), "reason": spacing["recommendation"]}
+    # Zero-sleep evaluation: max_inline_wait_hours=0.0 prevents any runner sleep
+    spacing = gate.evaluate_upload_spacing(elapsed_hours, min_spacing_hours, max_inline_wait_hours=0.0)
+    due_at = published_at + timedelta(hours=min_spacing_hours, minutes=2)
+    next_cron = f"{due_at.minute} {due_at.hour} * * *"
+
+    base = {
+        "elapsed_hours": round(elapsed_hours, 2),
+        "last_video_id": vid,
+        "next_cron": next_cron,
+    }
+
+    if not spacing["can_upload"]:
+        remaining = max(int(round((min_spacing_hours - elapsed_hours) * 3600)), 0)
+        return {
+            **base,
+            "proceed": False,
+            "remaining_seconds": remaining,
+            "due_at": due_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "reason": spacing["recommendation"],
+        }
+
+    # Layer 1 & Layer 2: check live YouTube telemetry when authenticated client is provided
+    if youtube_client is not None:
+        live = gate.evaluate_live_channel(youtube_client=youtube_client, history_path=Path(history_path))
+        candle_eval = live.get("candle_evaluation", {})
+        if candle_eval and not candle_eval.get("can_upload", True):
+            return {
+                **base,
+                "proceed": False,
+                "remaining_seconds": int(candle_eval.get("timer_seconds", 3600)),
+                "due_at": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "next_cron": f"{(now + timedelta(hours=1)).minute} {(now + timedelta(hours=1)).hour} * * *",
+                "reason": candle_eval.get("recommendation", "Blocked by Candle Gate Layer 1/2"),
+            }
+
+    return {
+        **base,
+        "proceed": True,
+        "remaining_seconds": 0,
+        "due_at": "",
+        "reason": spacing["recommendation"],
+    }
 
 
 def main() -> int:
@@ -127,42 +173,57 @@ def main() -> int:
     )
 
     if bypass:
-        result = {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
-                  "last_video_id": None,
-                  "reason": "PREFLIGHT_BYPASS set (manual dispatch) — spacing gate bypassed"}
+        result = {
+            "proceed": True,
+            "elapsed_hours": None,
+            "last_video_id": None,
+            "remaining_seconds": 0,
+            "due_at": "",
+            "next_cron": "0 * * * *",
+            "reason": "PREFLIGHT_BYPASS set (manual dispatch) — spacing gate bypassed",
+        }
     else:
+        yt_client = None
+        if build_youtube_client is not None:
+            try:
+                yt_client = build_youtube_client()
+            except Exception as exc:
+                print(f"⚠️ Skipping live Layer 1/2 check ({exc}); evaluating Layer 0 history only.")
         try:
-            result = decide()
-        except Exception as exc:  # belt-and-braces fail-open
-            result = {"proceed": True, "sleep_seconds": 0, "elapsed_hours": None,
-                      "last_video_id": None, "reason": f"fail-open: unexpected gate error ({exc})"}
-
-    if result["proceed"] and result["sleep_seconds"] > 0:
-        print(f"⏱️ Inline spacing sleep: {result['sleep_seconds'] // 60}m "
-              f"{result['sleep_seconds'] % 60}s (within "
-              f"{DEFAULT_MAX_INLINE_WAIT_HOURS * 60:.0f}-min inline window)")
-        time.sleep(result["sleep_seconds"])
+            result = decide(youtube_client=yt_client)
+        except Exception as exc:
+            result = {
+                "proceed": True,
+                "elapsed_hours": None,
+                "last_video_id": None,
+                "remaining_seconds": 0,
+                "due_at": "",
+                "next_cron": "0 * * * *",
+                "reason": f"fail-open: unexpected gate error ({exc})",
+            }
 
     icon = "✅ PROCEED" if result["proceed"] else "🛑 SKIP"
     print(f"{icon} | elapsed={result['elapsed_hours']}h | last_upload={result['last_video_id']}")
     if not result["proceed"] and result.get("due_at"):
-        print(f"⏰ Next upload due at {result['due_at']} ({result['remaining_seconds']}s from now)")
+        print(f"⏰ Next upload due at {result['due_at']} (cron: '{result.get('next_cron')}')")
     print(result["reason"])
 
     out_file = os.environ.get("GITHUB_OUTPUT")
     if out_file:
         with open(out_file, "a", encoding="utf-8") as f:
             f.write(f"proceed={'true' if result['proceed'] else 'false'}\n")
-            f.write(f"sleep_seconds={result['sleep_seconds']}\n")
             f.write(f"remaining_seconds={result.get('remaining_seconds', 0)}\n")
             f.write(f"due_at={result.get('due_at', '')}\n")
+            f.write(f"next_cron={result.get('next_cron', '0 * * * *')}\n")
 
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
-            f.write(f"### 🕯️ 24-Hour Spacing Pre-flight\n\n"
-                    f"{icon} — elapsed **{result['elapsed_hours']}h** since last upload "
-                    f"(`{result['last_video_id']}`)\n\n> {result['reason']}\n")
+            f.write(
+                f"### 🕯️ Algorithm Safety Pre-flight (Zero-Sleep)\n\n"
+                f"{icon} — elapsed **{result['elapsed_hours']}h** since last upload "
+                f"(`{result['last_video_id']}`)\n\n> {result['reason']}\n"
+            )
     return 0
 
 

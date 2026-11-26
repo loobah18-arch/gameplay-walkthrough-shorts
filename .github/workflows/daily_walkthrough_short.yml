@@ -2,10 +2,9 @@ name: ⏰ 24-Hour Daily Walkthrough Cutscene Shorts Pipeline
 
 on:
   schedule:
-    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC).
-    # The preflight_gate step strictly enforces that >= 24h have elapsed since
-    # the last upload in upload_history.json before triggering heavy download and rendering.
-    - cron: '0 0,6,12,18 * * *'
+    # Auto-calculated by core/schedule_updater.py to trigger at the exact 24h due minute (UTC).
+    # Falls back to hourly check ('0 * * * *') when no published upload exists yet.
+    - cron: '0 * * * *'
 
   workflow_dispatch:
     inputs:
@@ -27,11 +26,6 @@ on:
         required: false
         default: false
         type: boolean
-      from_timer:
-        description: 'Internal trigger from exact-due auto-restart timer'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
@@ -43,14 +37,14 @@ concurrency:
 
 jobs:
   preflight_gate:
-    name: 🕯️ 24-Hour Spacing Pre-flight Gate (Layer 0)
+    name: 🕯️ Algorithm Safety Pre-flight Gate (Zero-Sleep)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
 
     outputs:
       proceed: ${{ steps.gate.outputs.proceed }}
-      remaining_seconds: ${{ steps.gate.outputs.remaining_seconds }}
       due_at: ${{ steps.gate.outputs.due_at }}
+      next_cron: ${{ steps.gate.outputs.next_cron }}
 
     steps:
       - name: 📥 Check out repository
@@ -62,48 +56,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: 🕯️ Evaluate 24-Hour Upload Spacing (skip pipeline unless due)
+      - name: 📦 Install Lightweight Gate Dependencies
+        run: |
+          python3 -m pip install --quiet google-api-python-client google-auth
+
+      - name: 🕯️ Evaluate Layer 0 (24h) & Layer 1/2 Channel Telemetry
         id: gate
         env:
-          PREFLIGHT_BYPASS: ${{ inputs.force_run || (github.event_name != 'schedule' && !inputs.from_timer) }}
+          PREFLIGHT_BYPASS: ${{ inputs.force_run || github.event_name != 'schedule' }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           python3 core/preflight_gate.py
-
-  # When the 24h gate skips, calculate time remaining, sleep until exact due time,
-  # and automatically restart/dispatch the pipeline instead of wasting idle time.
-  exact_due_timer:
-    name: ⏰ Trigger Pipeline Exactly When 24h Is Up
-    needs: preflight_gate
-    if: needs.preflight_gate.outputs.proceed == 'false' && needs.preflight_gate.outputs.remaining_seconds != '' && fromJSON(needs.preflight_gate.outputs.remaining_seconds) > 0
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      actions: write
-    concurrency:
-      group: daily-walkthrough-exact-due-timer
-      cancel-in-progress: true
-    steps:
-      - name: ⏳ Sleep until due (${{ needs.preflight_gate.outputs.due_at }})
-        run: |
-          REM=${{ needs.preflight_gate.outputs.remaining_seconds }}
-          WAIT=$(( REM + 60 ))
-          MAX_SLEEP=20400
-          if [ "$WAIT" -gt "$MAX_SLEEP" ]; then
-            echo "Remaining wait (${WAIT}s) exceeds 5.6h runner cap. Sleeping ${MAX_SLEEP}s then chaining..."
-            sleep "$MAX_SLEEP"
-          else
-            echo "Sleeping ${WAIT}s until ${{ needs.preflight_gate.outputs.due_at }} (+60s margin)..."
-            [ "$WAIT" -gt 0 ] && sleep "$WAIT" || true
-          fi
-      - name: 🚀 Dispatch the pipeline now
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run daily_walkthrough_short.yml \
-            --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
-            -f game=${{ inputs.game || 'auto' }} -f from_timer=true
 
   daily_walkthrough_short:
     name: 🎮 24h Autonomous Cutscene Clipper
@@ -124,6 +91,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GH_WORKFLOW_PAT || github.token }}
 
       - name: 🐍 Set up Python 3.11
         uses: actions/setup-python@v5
@@ -194,7 +162,7 @@ jobs:
               print('ℹ️ No YOUTUBE_COOKIES secret configured. Will attempt download via public client.')
           "
 
-      - name: 🎬 Autonomous Cutscene Crawl, AniDoc Question & Letterbox Render
+      - name: 🎬 Autonomous Cutscene Crawl, Question Hook & Letterbox Render
         env:
           INPUT_GAME: ${{ inputs.game }}
           FORCE_RUN: ${{ inputs.force_run }}
@@ -231,16 +199,28 @@ jobs:
             "${COOKIE_ARGS[@]}" \
             "${POT_ARGS[@]}"
 
-      - name: 📝 Commit Upload & Question History Back to Repository
+      - name: 📅 Calculate Next Exact Upload Cron & Commit History
         if: always()
+        env:
+          HAS_WORKFLOW_PAT: ${{ secrets.GH_WORKFLOW_PAT != '' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          python3 core/schedule_updater.py --apply
+
           git add upload_history.json question_history.json candle_gate_state.json 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "No history changes to commit."
+          if [ "$HAS_WORKFLOW_PAT" = "true" ]; then
+            git add .github/workflows/daily_walkthrough_short.yml 2>/dev/null || true
           else
-            git commit -m "chore(history): update upload, question, and candle gate history [skip ci]"
+            echo "ℹ️ GH_WORKFLOW_PAT secret not configured — keeping hourly fallback cron ('0 * * * *') cleanly on GitHub."
+            git checkout -- .github/workflows/daily_walkthrough_short.yml 2>/dev/null || true
+          fi
+
+          if git diff --staged --quiet; then
+            echo "No history or schedule changes to commit."
+          else
+            git commit -m "chore(schedule): update upload history and next exact cron [skip ci]"
             git push origin HEAD:${{ github.ref }} || echo "Push skipped or already up to date."
           fi
 

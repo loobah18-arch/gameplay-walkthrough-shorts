@@ -273,7 +273,7 @@ class CandleGate:
         except Exception:
             return {}
 
-    def evaluate_live_channel(self, youtube_client=None) -> Dict[str, Any]:
+    def evaluate_live_channel(self, youtube_client=None, history_path: Path = None) -> Dict[str, Any]:
         """
         Polls YouTube Data API v3 for the channel's most recent video performance.
         Computes velocity and blocks uploads if an active push is in progress.
@@ -289,13 +289,13 @@ class CandleGate:
             published_at_str = None
 
             # First priority: check upload_history.json
-            history_file = Path(__file__).resolve().parent.parent / "upload_history.json"
+            history_file = Path(history_path) if history_path else (Path(__file__).resolve().parent.parent / "upload_history.json")
             if history_file.exists():
                 try:
                     records = json.loads(history_file.read_text(encoding="utf-8"))
                     if records and isinstance(records, list):
                         for rec in reversed(records):
-                            raw_id = rec.get("video_id")
+                            raw_id = rec.get("video_id") or rec.get("youtube_id")
                             if raw_id and not str(raw_id).startswith("dry_run"):
                                 vid_id = raw_id
                                 title = rec.get("title", title)
@@ -441,96 +441,20 @@ class CandleGate:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Jack Craig Candle Gate & Upload Cadence Evaluator")
-    parser.add_argument("--simulate", choices=["near_threshold", "early_momentum", "active_push", "cleared"], help="Simulate a scenario")
-    parser.add_argument("--status", action="store_true", help="Display current candle gate status")
+    """Prints current persisted CandleGate state."""
+    parser = argparse.ArgumentParser(description="Candle Gate & Upload Cadence Status")
     parser.add_argument("--str", type=float, default=82.0, help="Swipe through rate percentage")
     parser.add_argument("--avd", type=float, default=52.0, help="Average view duration in seconds")
     parser.add_argument("--duration", type=float, default=60.0, help="Video duration in seconds")
     args = parser.parse_args()
 
     gate = CandleGate()
-
-    if args.simulate == "near_threshold":
-        # Simulate video at 1,900 views in 10.5 hours (approaching 2k before 12 hours)
-        total_views = 1900
-        elapsed_hours = 10.5
-        layer1 = gate.evaluate_early_momentum(total_views, elapsed_hours)
-        layer2 = gate.evaluate_hourly_candles([100, 150, 250, 350, 500])
-        combined = {
-            "candle_evaluation": {
-                "decision": layer1["decision"],
-                "can_upload": layer1["can_upload"],
-                "requires_timer": layer1["requires_timer"],
-                "timer_seconds": layer1["timer_seconds"],
-                "active_layer": "Layer 1 (Early Momentum: 1-Hour Timer)",
-                "recommendation": layer1["recommendation"],
-                "layer1": layer1,
-                "layer2": layer2,
-            },
-            "last_snapshot": {
-                "total_views": total_views,
-                "elapsed_hours": elapsed_hours,
-            }
-        }
-        gate.save_state(combined)
-        print(json.dumps(combined, indent=2))
-        return
-
-    if args.simulate == "early_momentum":
-        # Simulate Layer 1 early momentum: video reaches 2,500 views in 7.0 hours (<12h)
-        total_views = 2500
-        elapsed_hours = 7.0
-        layer1 = gate.evaluate_early_momentum(total_views, elapsed_hours)
-        layer2 = gate.evaluate_hourly_candles([100, 200, 350, 450, 600, 800])
-        combined = {
-            "candle_evaluation": {
-                "decision": layer1["decision"],
-                "can_upload": layer1["can_upload"],
-                "active_layer": "Layer 1 (Early Momentum Gate: >=2k views in 12h)",
-                "recommendation": layer1["recommendation"],
-                "layer1": layer1,
-                "layer2": layer2,
-            },
-            "last_snapshot": {
-                "total_views": total_views,
-                "elapsed_hours": elapsed_hours,
-            }
-        }
-        gate.save_state(combined)
-        print(json.dumps(combined, indent=2))
-        return
-
-    if args.simulate == "active_push":
-        # Simulate active viral push: high hourly views, last hour at 18k
-        sample_candles = [300, 1000, 3000, 4000, 6000, 17000, 45000, 100000, 120000, 80000, 40000, 18000]
-        result = gate.evaluate_hourly_candles(sample_candles)
-        metrics = gate.evaluate_engagement_metrics(args.str, args.avd, args.duration)
-        combined = {"candle_evaluation": result, "engagement_metrics": metrics}
-        gate.save_state(combined)
-        print(json.dumps(combined, indent=2))
-        return
-
-    if args.simulate == "cleared":
-        # Simulate post-push stabilization: 26 hours below 2-3k views/hr (e.g. 1,500 views/hr)
-        sample_candles = [100000, 80000, 20000] + [1500] * 26
-        result = gate.evaluate_hourly_candles(sample_candles)
-        metrics = gate.evaluate_engagement_metrics(args.str, args.avd, args.duration)
-        combined = {"candle_evaluation": result, "engagement_metrics": metrics}
-        gate.save_state(combined)
-        print(json.dumps(combined, indent=2))
-        return
-
-    # Default status inspect
     saved = gate.load_state()
     if saved:
         print(json.dumps(saved, indent=2))
     else:
-        # Default run with sample cleared metrics
-        sample = [20000] + [1500] * 25
-        result = gate.evaluate_hourly_candles(sample)
         metrics = gate.evaluate_engagement_metrics(args.str, args.avd, args.duration)
-        print(json.dumps({"candle_evaluation": result, "engagement_metrics": metrics}, indent=2))
+        print(json.dumps({"engagement_metrics": metrics}, indent=2))
 
 
 if __name__ == "__main__":
