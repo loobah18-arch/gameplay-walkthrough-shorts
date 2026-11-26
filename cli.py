@@ -444,6 +444,10 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
         return None
 
+    if duration and duration > 14400:
+        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s > 4 hours (oversized movie).")
+        return None
+
     if age_limit >= 18:
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): age-restricted (age_limit={age_limit}).")
         return None

@@ -220,11 +220,20 @@ class WalkthroughCrawler:
                         "duration": cand["duration"],
                         "chapters": cand.get("chapters", []),
                     })
-                    if len(collected) >= max_candidates:
-                        return collected
+                    if len(collected) >= max_candidates * 2:
+                        break
 
             if collected:
-                break
+                def _duration_priority(c):
+                    dur = c.get("duration") or 999999
+                    if 300 <= dur <= 3600:
+                        return (0, dur)
+                    if 180 <= dur <= 7200:
+                        return (1, dur)
+                    return (2, dur)
+
+                collected.sort(key=_duration_priority)
+                return collected[:max_candidates]
 
         if not collected:
             # Fallback to curated channels RSS only if search returned no usable items

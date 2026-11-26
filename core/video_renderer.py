@@ -93,7 +93,7 @@ class VideoRenderer:
 
         if use_download_sections and start_time is not None and end_time is not None:
             section = f"*{VideoRenderer._format_hms(start_time)}-{VideoRenderer._format_hms(end_time)}"
-            cmd.extend(["--download-sections", section, "--force-keyframes-at-cuts"])
+            cmd.extend(["--download-sections", section])
 
         if client_override:
             cmd.extend(["--extractor-args", f"youtube:player_client={client_override}"])
@@ -106,12 +106,15 @@ class VideoRenderer:
         if vis:
             cmd.extend(["--extractor-args", f"youtube:visitor_data={vis}"])
 
+        if is_web_client and not pot:
+            bgutil_url = os.environ.get("BGUTIL_BASE_URL", "http://127.0.0.1:4416")
+            cmd.extend(["--extractor-args", f"youtubepot-bgutilhttp:base_url={bgutil_url}"])
+
         if use_cookies and cookies_path:
             cmd.extend(["--cookies", cookies_path])
         elif not use_cookies:
             cmd.append("--no-cookies")
 
-        cmd.extend(["--downloader", "native"])
         cmd.extend(["--format", format_spec])
         cmd.extend(["-o", output_filepath])
 
@@ -225,56 +228,6 @@ class VideoRenderer:
                     print(f"✅ [Tier 2] PO Token section download succeeded (cookies={use_c}): {found}")
                     return found
 
-            # Tier 2b: Native full-file download with web/mweb (no --download-sections)
-            # Avoids FFmpeg HTTP range 403 Forbidden errors
-            print(f"🛡️ [Tier 2b] Trying native full-file download with PO token (web,mweb, cookies={use_c})...")
-            temp_full2 = os.path.join(
-                os.path.dirname(os.path.abspath(output_filepath)),
-                f"full_src_pot_{uuid.uuid4().hex[:8]}.mp4",
-            )
-            cmd2b = cls.build_ytdlp_download_cmd(
-                video_url=video_url,
-                start_time=None,
-                end_time=None,
-                output_filepath=temp_full2,
-                cookies_path=c_path,
-                proxy=proxy,
-                client_override="web,mweb",
-                use_cookies=use_c,
-                po_token=po_token,
-                visitor_data=visitor_data,
-                format_spec="bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/b",
-                use_download_sections=False,
-            )
-            print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd2b)}")
-            res2b = subprocess.run(cmd2b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            if res2b.stdout:
-                print(res2b.stdout)
-            actual_full2 = cls.find_existing_media_file(temp_full2)
-            try:
-                if actual_full2 and os.path.isfile(actual_full2):
-                    print(f"✂️ Cutting section {start_time}s to {end_time}s via frame-accurate ffmpeg...")
-                    cut_cmd = [
-                        "ffmpeg", "-y",
-                        "-ss", str(start_time),
-                        "-to", str(end_time),
-                        "-i", actual_full2,
-                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-                        "-c:a", "aac", "-b:a", "192k",
-                        output_filepath,
-                    ]
-                    subprocess.run(cut_cmd, check=True)
-                    found = cls.find_existing_media_file(output_filepath)
-                    if found:
-                        print(f"✅ [Tier 2b] Successfully extracted clip from PO Token full download: {found}")
-                        return found
-            finally:
-                if actual_full2 and os.path.isfile(actual_full2):
-                    try:
-                        os.remove(actual_full2)
-                    except OSError:
-                        pass
-
         # Tier 3: Apple VisionOS / iOS HLS client (NO cookies)
         print("🍎 [Tier 3] Trying Apple VisionOS / iOS HLS client (no cookies)...")
         for client in ["visionos", "ios", "android_vr"]:
@@ -296,55 +249,54 @@ class VideoRenderer:
                     print(f"✅ [Tier 3] Apple/Mobile client section download succeeded ({client}): {found}")
                     return found
 
-        # Tier 4: CDN 403 Bypass (720p / progressive format 22 / 18 / b)
-        print("🛡️ [Tier 4] Fallback: Progressive 720p/360p native download to bypass CDN 403...")
-        temp_full = os.path.join(
-            os.path.dirname(os.path.abspath(output_filepath)),
-            f"full_source_{uuid.uuid4().hex[:8]}.mp4",
-        )
+        # Tier 4: Progressive 720p/360p formats with --download-sections
+        print("🛡️ [Tier 4] Fallback: Progressive 720p/360p download with --download-sections...")
         cmd4 = cls.build_ytdlp_download_cmd(
             video_url=video_url,
-            start_time=None,
-            end_time=None,
-            output_filepath=temp_full,
+            start_time=start_time,
+            end_time=end_time,
+            output_filepath=output_filepath,
             cookies_path=cookies_path if (cookies_path and os.path.isfile(cookies_path)) else None,
             proxy=proxy,
-            client_override="web,mweb,android",
+            client_override="android,web,mweb",
             use_cookies=bool(cookies_path and os.path.isfile(cookies_path)),
             format_spec="22/18/best[height<=720]/b",
-            use_download_sections=False,
+            use_download_sections=True,
         )
-        print(f"▶️ Executing: {cls._redact_cmd_for_log(cmd4)}")
-        res4 = subprocess.run(cmd4, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        if res4.stdout:
-            print(res4.stdout)
+        if run_ytdlp(cmd4):
+            found = cls.find_existing_media_file(output_filepath)
+            if found:
+                print(f"✅ [Tier 4] Progressive section download succeeded: {found}")
+                return found
 
-        actual_full = cls.find_existing_media_file(temp_full)
-        try:
-            if actual_full and os.path.isfile(actual_full):
-                print(f"✂️ Cutting section {start_time}s to {end_time}s via frame-accurate ffmpeg...")
-                cut_cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", str(start_time),
-                    "-to", str(end_time),
-                    "-i", actual_full,
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-                    "-c:a", "aac", "-b:a", "192k",
-                    output_filepath,
-                ]
-                subprocess.run(cut_cmd, check=True)
-                found = cls.find_existing_media_file(output_filepath)
-                if found:
-                    print(f"✅ [Tier 4] Successfully extracted clip from progressive download: {found}")
-                    return found
-        finally:
-            if actual_full and os.path.isfile(actual_full):
-                try:
-                    os.remove(actual_full)
-                except OSError:
-                    pass
+        # Tier 5: Direct FFmpeg stream seek
+        print("⚡ [Tier 5] Fallback: Direct FFmpeg stream seek...")
+        cmd5 = [
+            "yt-dlp",
+            "-4",
+            "--js-runtimes", "node",
+            "--no-playlist",
+            "--socket-timeout", "45",
+            "--downloader", "ffmpeg",
+            "--downloader-args", f"ffmpeg_i:-ss {cls._format_hms(start_time)} -to {cls._format_hms(end_time)}",
+            "--format", "18/best[height<=720]/b",
+            "-o", output_filepath,
+        ]
+        if cookies_path and os.path.isfile(cookies_path):
+            cmd5.extend(["--cookies", cookies_path])
+        else:
+            cmd5.append("--no-cookies")
+        p5 = proxy or os.environ.get("YOUTUBE_PROXY")
+        if p5:
+            cmd5.extend(["--proxy", p5])
+        cmd5.append(video_url)
+        if run_ytdlp(cmd5):
+            found = cls.find_existing_media_file(output_filepath)
+            if found:
+                print(f"✅ [Tier 5] Direct FFmpeg stream seek succeeded: {found}")
+                return found
 
-        raise RuntimeError(f"All download tiers failed for {video_url}")
+        raise RuntimeError(f"All section download tiers failed for {video_url} [{start_time}s-{end_time}s]")
 
     @classmethod
     def build_ffmpeg_filtergraph(
