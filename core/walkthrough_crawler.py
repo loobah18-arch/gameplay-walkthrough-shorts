@@ -117,35 +117,34 @@ class WalkthroughCrawler:
         cookies_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Searches YouTube for long-form game movies and cutscenes.
+        Searches YouTube for long-form game movies and cutscenes using fast flat-playlist dumping.
         Strictly filters out any video under 180 seconds (no Shorts allowed).
         """
+        search_target = f"ytsearch{max_results}:{query}" if not query.startswith("ytsearch") else query
         cmd = [
             "yt-dlp",
             "-4",
-            "--js-runtimes", "node",
-            "--default-search", f"ytsearch{max_results}:",
+            "--flat-playlist",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
-            "--match-filter", "duration >= 180 & !is_live",
         ]
         if proxy or os.environ.get("YOUTUBE_PROXY"):
             cmd.extend(["--proxy", proxy or os.environ["YOUTUBE_PROXY"]])
         if cookies_path and os.path.isfile(cookies_path):
             cmd.extend(["--cookies", cookies_path])
 
-        cmd.append(query)
+        cmd.append(search_target)
         results = []
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
             if res.returncode == 0 and res.stdout:
                 for line in res.stdout.strip().splitlines():
                     try:
                         data = json.loads(line)
                         dur = data.get("duration") or 0
                         # Hard filter: must be at least 3 minutes, not a Short
-                        if dur < 180:
+                        if dur > 0 and dur < 180:
                             continue
                         vid_id = data.get("id")
                         if vid_id:
@@ -184,46 +183,52 @@ class WalkthroughCrawler:
         clipped_ids = set(history.get("clipped_video_ids", []))
 
         selected_game_key = preferred_game if preferred_game in games else None
-        if not selected_game_key:
+        if selected_game_key:
+            target_games = [selected_game_key]
+        else:
             idx = len(history.get("entries", [])) % len(game_keys)
-            selected_game_key = game_keys[idx]
+            target_games = [game_keys[idx]] + [g for i, g in enumerate(game_keys) if i != idx]
 
-        game_data = games[selected_game_key]
-        game_name = game_data.get("name", selected_game_key)
-        queries = game_data.get("search_queries", [f"{game_name} All Cutscenes 4K"])
-
-        log(f"Discovering unclipped cutscene candidates for game: '{game_name}'")
         collected: List[Dict[str, Any]] = []
         seen_ids: Set[str] = set()
 
-        for query in queries:
-            candidates = self.search_game_walkthroughs(
-                query=query,
-                max_results=6,
-                proxy=proxy,
-                cookies_path=cookies_path,
-            )
-            for cand in candidates:
-                vid = cand["video_id"]
-                if vid in clipped_ids or vid in seen_ids:
-                    continue
-                seen_ids.add(vid)
-                collected.append({
-                    "game_key": selected_game_key,
-                    "game_name": game_name,
-                    "video_id": vid,
-                    "title": cand["title"],
-                    "url": cand["url"],
-                    "duration": cand["duration"],
-                    "chapters": cand.get("chapters", []),
-                })
-                if len(collected) >= max_candidates:
-                    return collected
+        for g_key in target_games:
+            game_data = games[g_key]
+            game_name = game_data.get("name", g_key)
+            queries = game_data.get("search_queries", [f"{game_name} All Cutscenes 4K"])
+
+            log(f"Discovering unclipped cutscene candidates for game: '{game_name}'")
+
+            for query in queries:
+                candidates = self.search_game_walkthroughs(
+                    query=query,
+                    max_results=6,
+                    proxy=proxy,
+                    cookies_path=cookies_path,
+                )
+                for cand in candidates:
+                    vid = cand["video_id"]
+                    if vid in clipped_ids or vid in seen_ids:
+                        continue
+                    seen_ids.add(vid)
+                    collected.append({
+                        "game_key": g_key,
+                        "game_name": game_name,
+                        "video_id": vid,
+                        "title": cand["title"],
+                        "url": cand["url"],
+                        "duration": cand["duration"],
+                        "chapters": cand.get("chapters", []),
+                    })
+                    if len(collected) >= max_candidates:
+                        return collected
+
+            if collected:
+                break
 
         if not collected:
             # Fallback to curated channels RSS only if search returned no usable items
             curated_channels = self.catalog.get("curated_channels", [])
-            game_tokens = {w.lower() for w in re.findall(r"[A-Za-z0-9]+", game_name) if len(w) > 2}
             for ch in curated_channels:
                 ch_id = ch.get("channel_id")
                 if not ch_id:
@@ -233,13 +238,10 @@ class WalkthroughCrawler:
                     title_lower = up["title"].lower()
                     if vid in clipped_ids or vid in seen_ids or "#shorts" in title_lower:
                         continue
-                    # Prefer uploads that mention the target game when falling back to general channels
-                    if game_tokens and not any(tok in title_lower for tok in game_tokens):
-                        continue
                     seen_ids.add(vid)
                     collected.append({
-                        "game_key": selected_game_key,
-                        "game_name": game_name,
+                        "game_key": target_games[0],
+                        "game_name": games[target_games[0]].get("name", target_games[0]),
                         "video_id": vid,
                         "title": up["title"],
                         "url": up["url"],

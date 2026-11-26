@@ -15,6 +15,7 @@ import argparse
 import http.server
 import json
 import socketserver
+import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
@@ -83,12 +84,27 @@ def main() -> int:
         def log_message(self, format, *args):
             pass
 
-    print("\n1. Open this link in Chrome/browser and pick your TARGET YouTube channel:\n")
+    print("\n1. Open this link in Chrome/browser and pick your SECONDARY YouTube channel:\n")
     print(auth_url)
-    print(f"\n2. Waiting for callback on {REDIRECT_URI} ...\n")
+    print(f"\n2. Waiting up to 90s for callback on {REDIRECT_URI} ...\n")
 
-    with socketserver.TCPServer(("127.0.0.1", PORT), OAuthHandler) as httpd:
+    try:
+        httpd = socketserver.TCPServer(("127.0.0.1", PORT), OAuthHandler)
+        httpd.timeout = 90
         httpd.handle_request()
+        httpd.server_close()
+    except Exception as e:
+        print(f"ℹ️ Local server: {e}")
+
+    if not auth_code:
+        print("\nIf your browser showed 'This site can't be reached', look at the address bar.")
+        manual_in = input("Paste full redirect URL or 'code' parameter (or press Enter to abort): ").strip()
+        if manual_in:
+            if "code=" in manual_in:
+                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(manual_in).query)
+                auth_code = parsed.get("code", [manual_in])[0]
+            else:
+                auth_code = manual_in
 
     if not auth_code:
         print("❌ Failed to capture authorization code.")
@@ -115,11 +131,22 @@ def main() -> int:
         print("❌ No refresh_token returned. Revoke prior app access in Google Account & retry with prompt=consent.")
         return 1
 
-    print("\n✅ OAuth Success! Upload these 3 secrets directly to GitHub via gh CLI:\n")
-    print("  gh secret set YOUTUBE_CLIENT_ID --repo loobah18-arch/gameplay-walkthrough-shorts")
-    print("  gh secret set YOUTUBE_CLIENT_SECRET --repo loobah18-arch/gameplay-walkthrough-shorts")
-    print("  gh secret set YOUTUBE_REFRESH_TOKEN --repo loobah18-arch/gameplay-walkthrough-shorts")
-    print(f"\nRefresh Token:\n{refresh_token}\n")
+    print("\n✅ OAuth Success! YouTube Refresh Token acquired.\n")
+    try:
+        set_gh = input("Automatically upload these 3 secrets to GitHub repo? (y/N): ").strip().lower()
+        if set_gh in ("y", "yes"):
+            subprocess.run(["gh", "secret", "set", "YOUTUBE_CLIENT_ID", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", client_id], check=True)
+            subprocess.run(["gh", "secret", "set", "YOUTUBE_CLIENT_SECRET", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", client_secret], check=True)
+            subprocess.run(["gh", "secret", "set", "YOUTUBE_REFRESH_TOKEN", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", refresh_token], check=True)
+            print("🚀 Successfully uploaded all 3 secrets to GitHub (loobah18-arch/gameplay-walkthrough-shorts)!")
+            return 0
+    except Exception as e:
+        print(f"Note: Automatic GitHub upload failed: {e}")
+
+    print("Or set them manually via gh CLI:\n")
+    print(f"  gh secret set YOUTUBE_CLIENT_ID --repo loobah18-arch/gameplay-walkthrough-shorts -b \"{client_id}\"")
+    print(f"  gh secret set YOUTUBE_CLIENT_SECRET --repo loobah18-arch/gameplay-walkthrough-shorts -b \"{client_secret}\"")
+    print(f"  gh secret set YOUTUBE_REFRESH_TOKEN --repo loobah18-arch/gameplay-walkthrough-shorts -b \"{refresh_token}\"")
     return 0
 
 
