@@ -129,11 +129,10 @@ class WalkthroughCrawler:
             "--dump-json",
             "--skip-download",
             "--no-playlist",
+            "--no-cookies",
         ]
         if proxy or os.environ.get("YOUTUBE_PROXY"):
             cmd.extend(["--proxy", proxy or os.environ["YOUTUBE_PROXY"]])
-        if cookies_path and os.path.isfile(cookies_path):
-            cmd.extend(["--cookies", cookies_path])
 
         cmd.append(search_target)
         results = []

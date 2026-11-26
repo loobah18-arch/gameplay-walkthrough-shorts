@@ -145,7 +145,9 @@ class WalkthroughFetcher:
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
-            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--remote-components", "ejs:github",
+            "--extractor-args", "youtube:player_client=ios,android_vr,mweb,web",
+            "--ignore-no-formats-error",
             "--no-playlist",
             "--write-auto-sub",
             "--write-sub",
@@ -155,23 +157,23 @@ class WalkthroughFetcher:
             "-o", out_template,
         ]
         proxy_args = self.get_proxy_args(proxy)
-        cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
-
         pattern = os.path.join(self.temp_dir, f"{prefix}*.vtt")
 
         try:
+            # Primary attempt without cookies to bypass datacenter bot challenges
             subprocess.run(
-                [*base_cmd, *cookie_args, *proxy_args, url],
+                [*base_cmd, "--no-cookies", *proxy_args, url],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             matched = glob.glob(pattern)
 
-            # Retry without cookies if authenticated request yielded no subtitles
+            # Retry with cookies only if unauthenticated request yielded no subtitles
+            cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
             if not matched and cookie_args:
                 subprocess.run(
-                    [*base_cmd, "--no-cookies", *proxy_args, url],
+                    [*base_cmd, *cookie_args, *proxy_args, url],
                     capture_output=True,
                     text=True,
                     check=False,

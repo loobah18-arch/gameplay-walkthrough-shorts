@@ -435,16 +435,18 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
         info = {}
 
     duration = info.get("duration") or candidate.get("duration") or 0
+    age_limit = info.get("age_limit") or candidate.get("age_limit") or 0
+    chapters = info.get("chapters") or candidate.get("chapters") or []
+
+    print(f"  ℹ️ [Candidate Stats] dur={duration}s, age_limit={age_limit}, chapters={len(chapters)}")
+
     if duration and duration < 180:
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
         return None
 
-    age_limit = info.get("age_limit") or candidate.get("age_limit") or 0
     if age_limit >= 18:
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): age-restricted (age_limit={age_limit}).")
         return None
-
-    chapters = info.get("chapters") or candidate.get("chapters") or []
     eligible_chapters = []
     for chap in chapters:
         c_title = chap.get("title", "")
