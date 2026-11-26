@@ -76,12 +76,22 @@ class TestCLI(unittest.TestCase):
         fetcher_valid.fetch_video_info.return_value = {
             "duration": 900,
             "chapters": [{"title": "Devin Weston Cliff Cutscene Ending", "start_time": 100, "end_time": 180}],
+            "age_limit": 0,
         }
         valid_cand = {"video_id": "v1", "title": "Full Movie", "url": "https://youtu.be/v1", "game_name": "GTA V"}
         picked = cli._select_verified_cutscene(valid_cand, fetcher_valid, analyzer, crawler)
         self.assertIsNotNone(picked)
         self.assertEqual(picked["scene_title"], "Devin Weston Cliff Cutscene Ending")
         self.assertGreaterEqual(picked["start"], 100)
+
+        # Age-restricted candidate -> rejected
+        fetcher_age = MagicMock()
+        fetcher_age.fetch_video_info.return_value = {
+            "duration": 900,
+            "chapters": [{"title": "Devin Weston Cliff Cutscene Ending", "start_time": 100, "end_time": 180}],
+            "age_limit": 18,
+        }
+        self.assertIsNone(cli._select_verified_cutscene(valid_cand, fetcher_age, analyzer, crawler))
 
 
 if __name__ == "__main__":

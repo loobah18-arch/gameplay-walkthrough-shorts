@@ -118,6 +118,7 @@ class WalkthroughFetcher:
             "max_resolution": f"{max_height}p" + ("60" if has_60fps else ""),
             "max_height": max_height,
             "has_60fps": has_60fps,
+            "age_limit": data.get("age_limit") or 0,
             "chapters": data.get("chapters") or [],
             "url": f"https://www.youtube.com/watch?v={data.get('id')}",
         }

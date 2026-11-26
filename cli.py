@@ -439,6 +439,11 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
         return None
 
+    age_limit = info.get("age_limit") or candidate.get("age_limit") or 0
+    if age_limit >= 18:
+        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): age-restricted (age_limit={age_limit}).")
+        return None
+
     chapters = info.get("chapters") or candidate.get("chapters") or []
     eligible_chapters = []
     for chap in chapters:
@@ -503,9 +508,9 @@ def cmd_daily_job(args):
 
     fetcher = WalkthroughFetcher()
     analyzer = CutsceneAnalyzer()
+    qm = QuestionManager()
 
-    selected = None
-    chosen_candidate = None
+    rendered_successfully = False
 
     for g_key in target_game_keys:
         candidates = crawler.list_candidates(
@@ -527,50 +532,52 @@ def cmd_daily_job(args):
                 cookies_path=args.cookies,
                 proxy=args.proxy,
             )
-            if picked:
-                selected = picked
-                chosen_candidate = candidate
-                break
+            if not picked:
+                continue
 
-        if selected and chosen_candidate:
+            vid_url = candidate["url"]
+            game_name = candidate["game_name"]
+            start_sec = picked["start"]
+            end_sec = picked["end"]
+            scene_title = picked["scene_title"]
+
+            top_question = qm.generate_question(
+                game_key=candidate.get("game_key", g_key),
+                game_name=game_name,
+                cutscene_title=scene_title,
+            )
+            print(f"💡 Top Engaging Question: \"{top_question}\"")
+
+            render_args = argparse.Namespace(
+                url=vid_url,
+                start=start_sec,
+                end=end_sec,
+                aspect_ratio="vertical_letterbox",
+                enable_subtitles=True,
+                cookies=args.cookies,
+                proxy=args.proxy,
+                po_token=getattr(args, "po_token", None),
+                visitor_data=getattr(args, "visitor_data", None),
+                output=f"{re.sub(r'[^A-Za-z0-9]+', '_', scene_title)[:40]}_letterbox.mp4",
+                top_question=top_question,
+                game=game_name,
+                title=f"{scene_title} | {game_name}",
+                upload=True,
+            )
+
+            try:
+                cmd_render_cloud_job(render_args)
+                rendered_successfully = True
+                break
+            except Exception as e:
+                print(f"⚠️ Render failed for '{candidate['title']}': {e}. Trying next candidate...")
+
+        if rendered_successfully:
             break
 
-    if not selected or not chosen_candidate:
-        print("❌ No candidate walkthrough contained a verified cutscene chapter or dialogue payoff. Aborting.")
+    if not rendered_successfully:
+        print("❌ Could not successfully cut, render, and publish any candidate walkthrough. Aborting.")
         sys.exit(1)
-
-    vid_url = chosen_candidate["url"]
-    game_name = chosen_candidate["game_name"]
-    start_sec = selected["start"]
-    end_sec = selected["end"]
-    scene_title = selected["scene_title"]
-
-    # Build top engaging question
-    qm = QuestionManager()
-    top_question = qm.generate_question(
-        game_key=chosen_candidate.get("game_key", "game"),
-        game_name=game_name,
-        cutscene_title=scene_title,
-    )
-    print(f"💡 Top Engaging Question: \"{top_question}\"")
-
-    render_args = argparse.Namespace(
-        url=vid_url,
-        start=start_sec,
-        end=end_sec,
-        aspect_ratio="vertical_letterbox",
-        enable_subtitles=True,
-        cookies=args.cookies,
-        proxy=args.proxy,
-        po_token=getattr(args, "po_token", None),
-        visitor_data=getattr(args, "visitor_data", None),
-        output=f"{re.sub(r'[^A-Za-z0-9]+', '_', scene_title)[:40]}_letterbox.mp4",
-        top_question=top_question,
-        game=game_name,
-        title=f"{scene_title} | {game_name}",
-        upload=True,
-    )
-    cmd_render_cloud_job(render_args)
 
 
 def main():
