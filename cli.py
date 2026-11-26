@@ -502,7 +502,7 @@ def cmd_daily_job(args):
         raise RuntimeError("No games found in catalog.")
 
     if args.game and args.game in games_dict:
-        target_game_keys = [args.game]
+        target_game_keys = [args.game] + [g for g in all_game_keys if g != args.game]
     else:
         history = crawler.get_clipped_history()
         idx = len(history.get("entries", [])) % len(all_game_keys)

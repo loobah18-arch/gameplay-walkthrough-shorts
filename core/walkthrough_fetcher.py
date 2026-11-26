@@ -146,7 +146,7 @@ class WalkthroughFetcher:
             "-4",
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
-            "--extractor-args", "youtube:player_client=ios,android_vr,mweb,web",
+            "--extractor-args", "youtube:player_client=web,mweb",
             "--ignore-no-formats-error",
             "--no-playlist",
             "--write-auto-sub",
