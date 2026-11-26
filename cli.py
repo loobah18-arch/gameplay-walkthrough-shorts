@@ -428,9 +428,14 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
     vid_id = candidate["video_id"]
     game_name = candidate["game_name"]
 
-    info = fetcher.fetch_video_info(vid_url, cookies_path=cookies_path, proxy=proxy)
+    try:
+        info = fetcher.fetch_video_info(vid_url, cookies_path=cookies_path, proxy=proxy)
+    except Exception as e:
+        print(f"⚠️ Could not fetch metadata for '{candidate['title']}' ({vid_id}): {e}")
+        info = {}
+
     duration = info.get("duration") or candidate.get("duration") or 0
-    if duration < 180:
+    if duration and duration < 180:
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
         return None
 

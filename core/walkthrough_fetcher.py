@@ -39,25 +39,36 @@ class WalkthroughFetcher:
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
+            "--extractor-args", "youtube:player_client=android,web",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
+            "--socket-timeout", "25",
         ]
         proxy_args = self.get_proxy_args(proxy)
         cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
 
         cmd = [*base_cmd, *cookie_args, *proxy_args, url]
 
+        res = None
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         except subprocess.CalledProcessError:
-            if not cookie_args:
-                raise
             # Fallback without cookies while preserving proxy settings
             cmd_fallback = [*base_cmd, "--no-cookies", *proxy_args, url]
-            res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
+            try:
+                res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
+            except subprocess.CalledProcessError:
+                return {}
 
-        data = json.loads(res.stdout)
+        if not res or not res.stdout:
+            return {}
+
+        try:
+            data = json.loads(res.stdout)
+        except Exception:
+            return {}
 
         # Extract max available height and 60fps flag
         formats = data.get("formats") or []
