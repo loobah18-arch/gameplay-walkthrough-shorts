@@ -72,7 +72,7 @@ class VideoRenderer:
         output_filepath: str = "temp/clip.mp4",
         cookies_path: Optional[str] = None,
         proxy: Optional[str] = None,
-        client_override: str = "android,ios,mweb,web",
+        client_override: str = "web,mweb",
         use_cookies: bool = True,
         po_token: Optional[str] = None,
         visitor_data: Optional[str] = None,

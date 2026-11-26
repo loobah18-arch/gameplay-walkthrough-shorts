@@ -80,14 +80,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    services:
-      # PO Token Provider to bypass YouTube bot detection on Azure runners
-      bgutil-provider:
-        image: brainicism/bgutil-ytdlp-pot-provider:latest
-        ports:
-          - 4416:4416
-
     steps:
+      - name: 🛡️ Launch bgutil PO Token Provider Container
+        run: |
+          docker run -d --name bgutil-provider --restart always -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider 2>/dev/null || true
+          for i in {1..10}; do
+            if curl -s http://127.0.0.1:4416/ping 2>/dev/null | grep -q "version"; then
+              echo "✅ bgutil Docker ready on :4416"
+              break
+            fi
+            sleep 1
+          done
       - name: 📥 Check out repository
         uses: actions/checkout@v4
         with:

@@ -39,11 +39,12 @@ class WalkthroughFetcher:
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
-            "--extractor-args", "youtube:player_client=android,ios,mweb",
+            "--remote-components", "ejs:github",
+            "--extractor-args", "youtube:player_client=web,mweb",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
-            "--socket-timeout", "30",
+            "--socket-timeout", "45",
         ]
         proxy_args = self.get_proxy_args(proxy)
         cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
