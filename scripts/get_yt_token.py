@@ -35,6 +35,8 @@ def main() -> int:
     parser.add_argument("--client-secrets", help="Optional path to Google OAuth client_secrets.json")
     parser.add_argument("--client-id", help="Google Cloud OAuth Client ID")
     parser.add_argument("--client-secret", help="Google Cloud OAuth Client Secret")
+    parser.add_argument("--auto-upload", action="store_true", help="Automatically push secrets to GitHub repo")
+    parser.add_argument("--timeout", type=int, default=300, help="Seconds to wait for redirect (default: 300)")
     args = parser.parse_args()
 
     client_id = (args.client_id or "").strip()
@@ -86,11 +88,11 @@ def main() -> int:
 
     print("\n1. Open this link in Chrome/browser and pick your SECONDARY YouTube channel:\n")
     print(auth_url)
-    print(f"\n2. Waiting up to 90s for callback on {REDIRECT_URI} ...\n")
+    print(f"\n2. Waiting up to {args.timeout}s for callback on {REDIRECT_URI} ...\n")
 
     try:
         httpd = socketserver.TCPServer(("127.0.0.1", PORT), OAuthHandler)
-        httpd.timeout = 90
+        httpd.timeout = args.timeout
         httpd.handle_request()
         httpd.server_close()
     except Exception as e:
@@ -98,13 +100,16 @@ def main() -> int:
 
     if not auth_code:
         print("\nIf your browser showed 'This site can't be reached', look at the address bar.")
-        manual_in = input("Paste full redirect URL or 'code' parameter (or press Enter to abort): ").strip()
-        if manual_in:
-            if "code=" in manual_in:
-                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(manual_in).query)
-                auth_code = parsed.get("code", [manual_in])[0]
-            else:
-                auth_code = manual_in
+        try:
+            manual_in = input("Paste full redirect URL or 'code' parameter (or press Enter to abort): ").strip()
+            if manual_in:
+                if "code=" in manual_in:
+                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(manual_in).query)
+                    auth_code = parsed.get("code", [manual_in])[0]
+                else:
+                    auth_code = manual_in
+        except (EOFError, KeyboardInterrupt):
+            pass
 
     if not auth_code:
         print("❌ Failed to capture authorization code.")
@@ -132,16 +137,23 @@ def main() -> int:
         return 1
 
     print("\n✅ OAuth Success! YouTube Refresh Token acquired.\n")
-    try:
-        set_gh = input("Automatically upload these 3 secrets to GitHub repo? (y/N): ").strip().lower()
-        if set_gh in ("y", "yes"):
+    upload_now = args.auto_upload
+    if not upload_now:
+        try:
+            set_gh = input("Automatically upload these 3 secrets to GitHub repo? (y/N): ").strip().lower()
+            upload_now = set_gh in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            upload_now = True
+
+    if upload_now:
+        try:
             subprocess.run(["gh", "secret", "set", "YOUTUBE_CLIENT_ID", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", client_id], check=True)
             subprocess.run(["gh", "secret", "set", "YOUTUBE_CLIENT_SECRET", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", client_secret], check=True)
             subprocess.run(["gh", "secret", "set", "YOUTUBE_REFRESH_TOKEN", "--repo", "loobah18-arch/gameplay-walkthrough-shorts", "-b", refresh_token], check=True)
             print("🚀 Successfully uploaded all 3 secrets to GitHub (loobah18-arch/gameplay-walkthrough-shorts)!")
             return 0
-    except Exception as e:
-        print(f"Note: Automatic GitHub upload failed: {e}")
+        except Exception as e:
+            print(f"Note: Automatic GitHub upload failed: {e}")
 
     print("Or set them manually via gh CLI:\n")
     print(f"  gh secret set YOUTUBE_CLIENT_ID --repo loobah18-arch/gameplay-walkthrough-shorts -b \"{client_id}\"")

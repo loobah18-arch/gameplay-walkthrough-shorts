@@ -40,16 +40,15 @@ class WalkthroughFetcher:
             "-4",
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
-            "--extractor-args", "youtube:player_client=web,mweb",
+            "--extractor-args", "youtube:player_client=android",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
             "--socket-timeout", "45",
         ]
         proxy_args = self.get_proxy_args(proxy)
-        cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
-
-        cmd = [*base_cmd, *cookie_args, *proxy_args, url]
+        # Primary attempt: Android player client without cookies (bypasses bot verification in datacenter IPs)
+        cmd = [*base_cmd, "--no-cookies", *proxy_args, url]
 
         res = None
         stdout = ""
@@ -60,9 +59,23 @@ class WalkthroughFetcher:
             res = e
             stdout = (getattr(e, "stdout", "") or "").strip()
 
-        if not stdout and cookie_args:
-            # Fallback without cookies while preserving proxy settings
-            cmd_fallback = [*base_cmd, "--no-cookies", *proxy_args, url]
+        if not stdout:
+            # Fallback attempt with web client and cookies if configured
+            cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
+            cmd_fallback = [
+                "yt-dlp",
+                "-4",
+                "--js-runtimes", "node",
+                "--remote-components", "ejs:github",
+                "--extractor-args", "youtube:player_client=web,mweb",
+                "--dump-json",
+                "--skip-download",
+                "--no-playlist",
+                "--socket-timeout", "45",
+                *cookie_args,
+                *proxy_args,
+                url,
+            ]
             try:
                 res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
                 stdout = (res.stdout or "").strip()

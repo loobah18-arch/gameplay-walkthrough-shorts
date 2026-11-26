@@ -62,8 +62,9 @@ I am just a machine, not a living being.
         fetcher = WalkthroughFetcher()
         info = fetcher.fetch_video_info("https://youtube.com/watch?v=vid123", proxy="http://proxy:8080")
         self.assertEqual(info["duration"], 0)
+        primary_cmd = mock_run.call_args_list[0].args[0]
+        self.assertIn("--no-cookies", primary_cmd)
         fallback_cmd = mock_run.call_args_list[1].args[0]
-        self.assertIn("--no-cookies", fallback_cmd)
         self.assertIn("--proxy", fallback_cmd)
         self.assertIn("http://proxy:8080", fallback_cmd)
 
