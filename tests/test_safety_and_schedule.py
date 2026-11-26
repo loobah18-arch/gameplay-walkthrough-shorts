@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from core.candle_gate import CandleGate
 from core.preflight_gate import decide
 from core.schedule_updater import calculate_next_schedule, update_workflow_cron
+from core.youtube_uploader import _resolve_oauth_env
 
 
 class TestSafetyAndSchedule(unittest.TestCase):
@@ -84,6 +85,21 @@ class TestSafetyAndSchedule(unittest.TestCase):
         self.assertFalse(l1["can_upload"])
         l2 = gate.evaluate_hourly_candles([1000, 3000] + [1500] * 24)
         self.assertTrue(l2["can_upload"])
+
+    def test_resolve_oauth_env_supports_bare_and_prefixed_keys(self):
+        with patch_env({"CLIENT_ID": "cid_bare", "CLIENT_SECRET": "sec_bare", "REFRESH_TOKEN": "ref_bare"}):
+            oauth = _resolve_oauth_env()
+            self.assertEqual(oauth["client_id"], "cid_bare")
+            self.assertEqual(oauth["client_secret"], "sec_bare")
+            self.assertEqual(oauth["refresh_token"], "ref_bare")
+
+
+def patch_env(mapping):
+    import os
+    from unittest.mock import patch
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(("YOUTUBE_CLIENT_", "YOUTUBE_REFRESH_", "CLIENT_", "REFRESH_"))}
+    clean.update(mapping)
+    return patch.dict(os.environ, clean, clear=True)
 
 
 if __name__ == "__main__":

@@ -66,8 +66,9 @@ jobs:
         id: gate
         env:
           PREFLIGHT_BYPASS: ${{ inputs.force_run || github.event_name != 'schedule' }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID || secrets.CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET || secrets.CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || secrets.REFRESH_TOKEN }}
         run: |
           set -euo pipefail
           python3 core/preflight_gate.py
@@ -167,8 +168,9 @@ jobs:
           INPUT_GAME: ${{ inputs.game }}
           FORCE_RUN: ${{ inputs.force_run }}
           YOUTUBE_PROXY: ${{ secrets.YOUTUBE_PROXY }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID || secrets.CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET || secrets.CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || secrets.REFRESH_TOKEN }}
           YT_PO_TOKEN: ${{ steps.pot_gen.outputs.po_token }}
           YT_VISITOR_DATA: ${{ steps.pot_gen.outputs.visitor_data }}
         run: |

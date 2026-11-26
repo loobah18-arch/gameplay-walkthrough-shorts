@@ -15,27 +15,38 @@ from config.settings import ROOT_DIR
 UPLOAD_HISTORY_PATH = os.path.join(ROOT_DIR, "upload_history.json")
 
 
+def _resolve_oauth_env() -> Dict[str, Optional[str]]:
+    """Resolves YouTube OAuth env vars supporting both YOUTUBE_* and bare secret names."""
+    client_secret = (os.environ.get("YOUTUBE_CLIENT_SECRET") or os.environ.get("CLIENT_SECRET") or "").strip()
+    refresh_token = (os.environ.get("YOUTUBE_REFRESH_TOKEN") or os.environ.get("REFRESH_TOKEN") or "").strip()
+    client_id_env = (os.environ.get("YOUTUBE_CLIENT_ID") or os.environ.get("CLIENT_ID") or "").strip()
+
+    creds_data = json.loads(client_secret) if client_secret.startswith("{") else {}
+    app_block = creds_data.get("installed") or creds_data.get("web") or {}
+    client_id = app_block.get("client_id") or client_id_env
+    client_secret_val = app_block.get("client_secret") or client_secret
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret_val,
+        "refresh_token": refresh_token,
+    }
+
+
 def build_youtube_client():
     """Builds an authenticated YouTube Data API v3 client from env secrets, or returns None."""
-    client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
-    refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "").strip()
-    if not (client_secret and refresh_token):
+    oauth = _resolve_oauth_env()
+    if not (oauth["client_id"] and oauth["client_secret"] and oauth["refresh_token"]):
         return None
 
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
-    creds_data = json.loads(client_secret) if client_secret.startswith("{") else {}
-    app_block = creds_data.get("installed") or creds_data.get("web") or {}
-    client_id = app_block.get("client_id") or os.environ.get("YOUTUBE_CLIENT_ID")
-    client_secret_val = app_block.get("client_secret") or client_secret
-
     creds = Credentials(
         token=None,
-        refresh_token=refresh_token,
+        refresh_token=oauth["refresh_token"],
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret_val,
+        client_id=oauth["client_id"],
+        client_secret=oauth["client_secret"],
     )
     return build("youtube", "v3", credentials=creds)
 
@@ -110,16 +121,15 @@ class YouTubeUploader:
         """
         Uploads Short to YouTube if credentials exist, or saves clean metadata artifact.
         """
-        client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
-        refresh_token = os.environ.get("YOUTUBE_REFRESH_TOKEN", "").strip()
-
-        if not (client_secret and refresh_token):
+        oauth = _resolve_oauth_env()
+        if not (oauth["client_id"] and oauth["client_secret"] and oauth["refresh_token"]):
             print("\n=======================================================")
             print("ℹ️ YouTube Channel Not Connected Yet")
             print("   Output Short is saved and ready in the output directory.")
             print("   To enable automatic publishing, set GitHub Secrets:")
-            print("   - YOUTUBE_CLIENT_SECRET")
-            print("   - YOUTUBE_REFRESH_TOKEN")
+            print("   - YOUTUBE_CLIENT_ID (or CLIENT_ID)")
+            print("   - YOUTUBE_CLIENT_SECRET (or CLIENT_SECRET)")
+            print("   - YOUTUBE_REFRESH_TOKEN (or REFRESH_TOKEN)")
             print("=======================================================\n")
             return self.record_upload(
                 video_file=video_path,

@@ -158,8 +158,9 @@ jobs:
           ENABLE_SUBS: ${{ inputs.enable_subtitles }}
           UPLOAD_TO_YT: ${{ inputs.upload_to_youtube }}
           YOUTUBE_PROXY: ${{ secrets.YOUTUBE_PROXY }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID || secrets.CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET || secrets.CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN || secrets.REFRESH_TOKEN }}
           YT_PO_TOKEN: ${{ steps.pot_gen.outputs.po_token }}
           YT_VISITOR_DATA: ${{ steps.pot_gen.outputs.visitor_data }}
         run: |
