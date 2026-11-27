@@ -29,6 +29,44 @@ class WalkthroughFetcher:
             return ["--proxy", p]
         return []
 
+    @classmethod
+    def parse_chapters_from_description(
+        cls, description: str, total_duration: float = 0.0
+    ) -> List[Dict[str, Any]]:
+        """Extracts timestamped chapters from a video description if yt-dlp omitted chapters."""
+        if not description:
+            return []
+        pattern = re.compile(
+            r"^\s*(?:[\[\(\-\*•]*\s*)?(\d{1,2}:\d{2}(?::\d{2})?)(?:[\]\)]*\s*[-–—:|]*\s+)(.+?)\s*$"
+        )
+        entries = []
+        for line in description.splitlines():
+            m = pattern.match(line)
+            if not m:
+                continue
+            ts_str, title = m.group(1), m.group(2).strip(" -–—:|")
+            if not title or len(title) < 2:
+                continue
+            try:
+                sec = cls.parse_timestamp(ts_str)
+            except Exception:
+                continue
+            entries.append((sec, title))
+
+        if len(entries) < 2:
+            return []
+        entries.sort(key=lambda x: x[0])
+        chapters: List[Dict[str, Any]] = []
+        for idx, (start_sec, title) in enumerate(entries):
+            end_sec = entries[idx + 1][0] if idx + 1 < len(entries) else float(total_duration or (start_sec + 60.0))
+            if end_sec > start_sec:
+                chapters.append({
+                    "start_time": round(start_sec, 2),
+                    "end_time": round(end_sec, 2),
+                    "title": title,
+                })
+        return chapters
+
     def fetch_video_info(
         self, url: str, cookies_path: Optional[str] = None, proxy: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -61,9 +99,10 @@ class WalkthroughFetcher:
             res = e
             stdout = (getattr(e, "stdout", "") or "").strip()
 
-        if not stdout:
-            # Fallback attempt with web client, remote EJS component, and cookies if configured
-            cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
+        ran_fallback = False
+        cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
+
+        def _run_web_fallback():
             cmd_fallback = [
                 "yt-dlp",
                 "-4",
@@ -81,11 +120,14 @@ class WalkthroughFetcher:
                 url,
             ]
             try:
-                res = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
-                stdout = (res.stdout or "").strip()
+                r = subprocess.run(cmd_fallback, capture_output=True, text=True, check=True)
+                return r, (r.stdout or "").strip()
             except subprocess.CalledProcessError as e2:
-                res = e2
-                stdout = (getattr(e2, "stdout", "") or "").strip()
+                return e2, (getattr(e2, "stdout", "") or "").strip()
+
+        if not stdout:
+            ran_fallback = True
+            res, stdout = _run_web_fallback()
 
         if not stdout:
             err_msg = str(getattr(res, "stderr", "") or res or "").strip().replace("\n", " ")[:200]
@@ -97,6 +139,24 @@ class WalkthroughFetcher:
         except Exception as e:
             print(f"⚠️ [fetch_video_info] JSON decode error for {url}: {e}")
             return {}
+
+        dur = data.get("duration") or 0
+        chapters = data.get("chapters") or self.parse_chapters_from_description(data.get("description") or "", dur)
+
+        # If unauthenticated ios/android_vr returned JSON without webpage chapters and cookies exist, check web fallback
+        if not chapters and not ran_fallback and cookie_args:
+            _r2, fb_stdout = _run_web_fallback()
+            if fb_stdout:
+                try:
+                    fb_data = json.loads(fb_stdout)
+                    fb_chapters = fb_data.get("chapters") or self.parse_chapters_from_description(
+                        fb_data.get("description") or "", fb_data.get("duration") or dur
+                    )
+                    if fb_chapters:
+                        data = fb_data
+                        chapters = fb_chapters
+                except Exception:
+                    pass
 
         # Extract max available height and 60fps flag
         formats = data.get("formats") or []
@@ -121,7 +181,7 @@ class WalkthroughFetcher:
             "max_height": max_height,
             "has_60fps": has_60fps,
             "age_limit": data.get("age_limit") or 0,
-            "chapters": data.get("chapters") or [],
+            "chapters": chapters,
             "url": f"https://www.youtube.com/watch?v={data.get('id')}",
         }
 

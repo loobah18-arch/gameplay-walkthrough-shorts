@@ -224,15 +224,8 @@ class WalkthroughCrawler:
                         break
 
             if collected:
-                def _duration_priority(c):
-                    dur = c.get("duration") or 999999
-                    if 300 <= dur <= 3600:
-                        return (0, dur)
-                    if 180 <= dur <= 7200:
-                        return (1, dur)
-                    return (2, dur)
-
-                collected.sort(key=_duration_priority)
+                # Keep Query-1 chaptered full movies eligible while deferring >8h streams
+                collected.sort(key=lambda c: 1 if (c.get("duration") or 0) > 28800 else 0)
                 return collected[:max_candidates]
 
         if not collected:

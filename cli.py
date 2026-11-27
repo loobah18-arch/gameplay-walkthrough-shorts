@@ -523,7 +523,7 @@ def cmd_daily_job(args):
             preferred_game=g_key,
             proxy=args.proxy,
             cookies_path=args.cookies,
-            max_candidates=6,
+            max_candidates=12,
         )
         if not candidates:
             continue

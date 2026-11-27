@@ -119,7 +119,7 @@ jobs:
       - name: 📦 Install Python & Node Dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install -U yt-dlp yt-dlp-ejs bgutil-ytdlp-pot-provider
+          pip install -U --pre yt-dlp yt-dlp-ejs bgutil-ytdlp-pot-provider
           pip install -r requirements.txt
           sudo npm install -g youtube-po-token-generator 2>/dev/null || npm install -g youtube-po-token-generator || true
 

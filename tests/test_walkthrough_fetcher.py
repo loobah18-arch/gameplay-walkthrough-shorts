@@ -81,6 +81,19 @@ I am just a machine, not a living being.
         self.assertIn("youtube:player_client=web,mweb", second_cmd)
         self.assertTrue(any("youtubepot-bgutilhttp:base_url=" in a for a in second_cmd))
 
+    def test_parse_chapters_from_description(self):
+        desc = """All Cutscenes Timestamps:
+00:00 Opening Scene
+05:30 Final Confrontation
+12:45 Ending Choice
+"""
+        chapters = WalkthroughFetcher.parse_chapters_from_description(desc, total_duration=900.0)
+        self.assertEqual(len(chapters), 3)
+        self.assertEqual(chapters[1]["title"], "Final Confrontation")
+        self.assertEqual(chapters[1]["start_time"], 330.0)
+        self.assertEqual(chapters[1]["end_time"], 765.0)
+        self.assertEqual(chapters[2]["end_time"], 900.0)
+
 
 if __name__ == "__main__":
     unittest.main()
