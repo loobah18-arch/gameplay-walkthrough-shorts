@@ -37,5 +37,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T06:02:47.219475+00:00",
+    "title": "Final confrontation | Grand Theft Auto V",
+    "game_name": "Grand Theft Auto V",
+    "source_video_id": "S2n_HpjqJW0",
+    "cutscene_title": "Final_confrontation_letterbox.mp4",
+    "top_question": "DID DEVIN WESTON DESERVE THIS ENDING?",
+    "file": "Final_confrontation_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
