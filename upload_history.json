@@ -63,5 +63,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T06:17:01.665226+00:00",
+    "title": "The Interrogation | Detroit: Become Human",
+    "game_name": "Detroit: Become Human",
+    "source_video_id": "U6PGp8TF9Qs",
+    "cutscene_title": "The_Interrogation_letterbox.mp4",
+    "top_question": "THE INTERROGATION | DID HE MAKE THE RIGHT CHOICE?",
+    "file": "The_Interrogation_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
