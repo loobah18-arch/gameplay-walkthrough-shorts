@@ -76,5 +76,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T06:36:49.054921+00:00",
+    "title": "The final decision | Detroit: Become Human",
+    "game_name": "Detroit: Become Human",
+    "source_video_id": "Om2qWmG-iwM",
+    "cutscene_title": "The_final_decision_letterbox.mp4",
+    "top_question": "THE FINAL DECISION | DID HE MAKE THE RIGHT CHOICE?",
+    "file": "The_final_decision_letterbox.mp4",
+    "duration": 55.0,
+    "published": true,
+    "youtube_id": "0S-SssUoOpk",
+    "status": "published"
   }
 ]
