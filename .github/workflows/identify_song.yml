@@ -1,4 +1,4 @@
-name: 🎵 Identify BGM with Whisper & Shazam
+name: 🎵 Identify BGM Pitch Variations
 
 on:
   workflow_dispatch:
@@ -13,24 +13,28 @@ jobs:
           python-version: '3.11'
       - name: Install Tools
         run: |
-          pip install faster-whisper shazamio
+          pip install shazamio
           sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Slice Audio & Run Shazam
+      - name: Generate Speed Variations & Shazam
         run: |
-          # Slice 2s to 10s (pure music, no intro/outro)
-          ffmpeg -y -i assets/audio/default_bgm.mp3 -ss 00:00:02 -to 00:00:10 -c:a pcm_s16le clean_slice.wav
           python3 -c "
-          import asyncio
+          import asyncio, subprocess
           from shazamio import Shazam
 
-          async def run():
+          async def check():
               shazam = Shazam()
-              out = await shazam.recognize('clean_slice.wav')
-              track = out.get('track')
-              print('CLEAN_SLICE_MATCH:', track)
-              if track:
-                  print('FOUND_TITLE:', track.get('title'))
-                  print('FOUND_ARTIST:', track.get('subtitle'))
-          asyncio.run(run())
+              # test original, 0.75x, 0.8x, 0.85x, 0.9x, 1.1x, 1.2x
+              speeds = [1.0, 0.75, 0.8, 0.83, 0.85, 0.9, 0.95, 1.15, 1.25]
+              for sp in speeds:
+                  out_wav = f'test_{sp}.wav'
+                  subprocess.run(['ffmpeg', '-y', '-i', 'assets/audio/default_bgm.mp3', '-filter:a', f'atempo={sp}', out_wav], check=True, stderr=subprocess.DEVNULL)
+                  res = await shazam.recognize(out_wav)
+                  track = res.get('track')
+                  if track:
+                      print(f'>>> SUCCESS AT {sp}x! Title: {track.get(\"title\")}, Artist: {track.get(\"subtitle\")}')
+                      return
+                  else:
+                      print(f'No match at {sp}x')
+
+          asyncio.run(check())
           "
-          python3 test_segments.py
