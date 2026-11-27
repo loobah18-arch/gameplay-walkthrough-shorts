@@ -293,21 +293,27 @@ class SubtitleBuilder:
 
         # Y position of the subtitle text
         if aspect_ratio_key == "vertical_letterbox":
-            # 16:9 video is centered in y=656 to 1264.
-            # int(H * 0.53) = 1017px, placed in the lower half of the widescreen video.
-            y_pos = int(h_res * 0.53)
+            # 16:9 widescreen video is centered in y=656 to 1264.
+            # Bottom black bar is y=1264 to 1920.
+            # Positioning subtitles at y=1410 places them cleanly in the bottom black space,
+            # with 0% overlap on cutscene footage and clear of YouTube Shorts bottom UI.
+            y_pos = 1410
+            cap_font_size = 88
             header_margin_v = 280
             header_font_size = 52
         elif aspect_ratio_key == "square_letterbox":
-            y_pos = int(h_res * 0.53)
+            y_pos = 1580
+            cap_font_size = 88
             header_margin_v = 180
             header_font_size = 48
         elif "square" in aspect_ratio_key:
             y_pos = int(h_res * 0.72)
+            cap_font_size = 98
             header_margin_v = 45
             header_font_size = 36
         else:
             y_pos = int(h_res * 0.53)
+            cap_font_size = 98
             header_margin_v = 140
             header_font_size = 44
 
@@ -321,7 +327,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{ANIDOC_FONT},98,&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,&H96000000,1,0,0,0,100,100,3,0,1,0,3,5,60,60,0,1
+Style: Cap,{ANIDOC_FONT},{cap_font_size},&H00FFFFFF,&H00FFFFFF,&H00FFFFFF,&H96000000,1,0,0,0,100,100,3,0,1,0,3,5,60,60,0,1
 Style: HeaderQuestion,{ANIDOC_FONT},{header_font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0.8,0,1,0,0,8,60,60,{header_margin_v},1
 
 [Events]

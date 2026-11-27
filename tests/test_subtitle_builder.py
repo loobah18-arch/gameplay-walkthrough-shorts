@@ -63,7 +63,8 @@ class TestSubtitleBuilder(unittest.TestCase):
 
             self.assertIn("PlayResX: 1080", content)
             self.assertIn("PlayResY: 1920", content)
-            self.assertIn("Style: Cap,Montserrat ExtraBold,98", content)
+            self.assertIn("Style: Cap,Montserrat ExtraBold,88", content)
+            self.assertIn("\\pos(540,1410)", content)
             self.assertIn("HeaderQuestion", content)
             self.assertIn("WHY IS TREVOR", content)
             self.assertIn("SO UNHINGED?", content)
