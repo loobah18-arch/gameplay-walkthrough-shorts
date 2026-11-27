@@ -35,17 +35,18 @@ class WalkthroughFetcher:
         """
         Retrieves video metadata, chapters, and available resolutions without downloading media.
         """
+        bgutil_url = os.environ.get("BGUTIL_BASE_URL", "http://127.0.0.1:4416")
         base_cmd = [
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
             "--extractor-args", "youtube:player_client=ios,android_vr,mweb,web",
+            "--extractor-args", f"youtubepot-bgutilhttp:base_url={bgutil_url}",
             "--ignore-no-formats-error",
             "--dump-json",
             "--skip-download",
             "--no-playlist",
-            "--socket-timeout", "45",
+            "--socket-timeout", "30",
         ]
         proxy_args = self.get_proxy_args(proxy)
         # Primary attempt: Public multi-client without cookies (uses bgutil :4416 if present, bypasses bot blocks)
@@ -61,7 +62,7 @@ class WalkthroughFetcher:
             stdout = (getattr(e, "stdout", "") or "").strip()
 
         if not stdout:
-            # Fallback attempt with web client and cookies if configured
+            # Fallback attempt with web client, remote EJS component, and cookies if configured
             cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
             cmd_fallback = [
                 "yt-dlp",
@@ -69,11 +70,12 @@ class WalkthroughFetcher:
                 "--js-runtimes", "node",
                 "--remote-components", "ejs:github",
                 "--extractor-args", "youtube:player_client=web,mweb",
+                "--extractor-args", f"youtubepot-bgutilhttp:base_url={bgutil_url}",
                 "--ignore-no-formats-error",
                 "--dump-json",
                 "--skip-download",
                 "--no-playlist",
-                "--socket-timeout", "45",
+                "--socket-timeout", "30",
                 *cookie_args,
                 *proxy_args,
                 url,
@@ -145,10 +147,9 @@ class WalkthroughFetcher:
             "yt-dlp",
             "-4",
             "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "--extractor-args", "youtube:player_client=web,mweb",
             "--ignore-no-formats-error",
             "--no-playlist",
+            "--socket-timeout", "30",
             "--write-auto-sub",
             "--write-sub",
             "--sub-format", "vtt",
@@ -157,30 +158,64 @@ class WalkthroughFetcher:
             "-o", out_template,
         ]
         proxy_args = self.get_proxy_args(proxy)
+        bgutil_url = os.environ.get("BGUTIL_BASE_URL", "http://127.0.0.1:4416")
         pattern = os.path.join(self.temp_dir, f"{prefix}*.vtt")
 
         try:
-            # Primary attempt without cookies to bypass datacenter bot challenges
-            subprocess.run(
-                [*base_cmd, "--no-cookies", *proxy_args, url],
+            # Tier 1: Public ios,android_vr clients without cookies (do NOT require subs PO tokens)
+            r1 = subprocess.run(
+                [*base_cmd, "--extractor-args", "youtube:player_client=ios,android_vr", "--no-cookies", *proxy_args, url],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             matched = glob.glob(pattern)
 
-            # Retry with cookies only if unauthenticated request yielded no subtitles
-            cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
-            if not matched and cookie_args:
-                subprocess.run(
-                    [*base_cmd, *cookie_args, *proxy_args, url],
+            # Tier 2: web,mweb with bgutil HTTP PO token provider (no cookies)
+            if not matched:
+                r2 = subprocess.run(
+                    [
+                        *base_cmd,
+                        "--remote-components", "ejs:github",
+                        "--extractor-args", "youtube:player_client=web,mweb",
+                        "--extractor-args", f"youtubepot-bgutilhttp:base_url={bgutil_url}",
+                        "--no-cookies",
+                        *proxy_args,
+                        url,
+                    ],
                     capture_output=True,
                     text=True,
                     check=False,
                 )
                 matched = glob.glob(pattern)
+                if not matched and r2.stderr:
+                    r1 = r2
+
+            # Tier 3: Retry with cookies if unauthenticated requests yielded no subtitles
+            cookie_args = CookieManager.get_ytdlp_cookie_args(cookies_path)
+            if not matched and cookie_args:
+                r3 = subprocess.run(
+                    [
+                        *base_cmd,
+                        "--remote-components", "ejs:github",
+                        "--extractor-args", "youtube:player_client=web,mweb",
+                        "--extractor-args", f"youtubepot-bgutilhttp:base_url={bgutil_url}",
+                        *cookie_args,
+                        *proxy_args,
+                        url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                matched = glob.glob(pattern)
+                if not matched and r3.stderr:
+                    r1 = r3
 
             if not matched:
+                err_tail = (getattr(r1, "stderr", "") or "").strip().replace("\n", " ")[:180]
+                if err_tail:
+                    print(f"⚠️ [fetch_transcript] No subtitles retrieved for {video_id}: {err_tail}")
                 return []
 
             vtt_file = sorted(matched, key=os.path.getmtime, reverse=True)[0]

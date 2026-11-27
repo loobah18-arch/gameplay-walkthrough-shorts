@@ -444,8 +444,8 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
         print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s < 180s (Short/too short).")
         return None
 
-    if duration and duration > 14400:
-        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s > 4 hours (oversized movie).")
+    if duration and duration > 28800:
+        print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): duration {duration}s > 8 hours (oversized movie).", flush=True)
         return None
 
     if age_limit >= 18:
@@ -485,10 +485,10 @@ def _select_verified_cutscene(candidate, fetcher, analyzer, crawler, cookies_pat
             game_name, seg["sample_dialogue"], payoff_phrase=seg.get("payoff_line")
         )
         if not crawler.is_previously_clipped(vid_id, scene_title):
-            print(f"🎬 Selected Dialogue Cutscene Climax: '{scene_title}' ({seg['start']}s -> {seg['end']}s)")
+            print(f"🎬 Selected Dialogue Cutscene Climax: '{scene_title}' ({seg['start']}s -> {seg['end']}s)", flush=True)
             return {"start": seg["start"], "end": seg["end"], "scene_title": scene_title}
 
-    print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): no verified cutscene chapters or payoff dialogue found.")
+    print(f"⏭️ Rejecting '{candidate['title']}' ({vid_id}): no verified cutscene chapters or payoff dialogue found (cues={len(cues)}, segs={len(segments)}).", flush=True)
     return None
 
 
@@ -523,7 +523,7 @@ def cmd_daily_job(args):
             preferred_game=g_key,
             proxy=args.proxy,
             cookies_path=args.cookies,
-            max_candidates=10,
+            max_candidates=6,
         )
         if not candidates:
             continue

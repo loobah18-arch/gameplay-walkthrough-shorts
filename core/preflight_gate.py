@@ -145,7 +145,7 @@ def decide(
 
     # Layer 1 & Layer 2: check live YouTube telemetry when authenticated client is provided
     if youtube_client is not None:
-        live = gate.evaluate_live_channel(youtube_client=youtube_client, history_path=Path(history_path))
+        live = gate.evaluate_live_channel(youtube_client=youtube_client, history_path=Path(history_path), now=now)
         candle_eval = live.get("candle_evaluation", {})
         if candle_eval and not candle_eval.get("can_upload", True):
             return {

@@ -28,15 +28,17 @@ class CutsceneAnalyzer:
         """Matches keyword/phrase on word boundaries so substrings inside words never match."""
         return bool(re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text_lower))
 
+    @staticmethod
+    def _strip_sound_tags(text: str) -> str:
+        """Removes non-speech caption markers like [Music] or [Applause]."""
+        return re.sub(r"\[[^\]]+\]", " ", text or "").strip()
+
     def check_incomplete_ending(self, text: str) -> bool:
         """
         Determines whether a sentence or subtitle cue ends prematurely,
         e.g. dangling conjunctions, trailing prepositions, trailing commas/ellipses.
         """
-        if not text:
-            return True
-
-        cleaned = text.strip()
+        cleaned = self._strip_sound_tags(text)
         if not cleaned:
             return True
 
@@ -117,7 +119,7 @@ class CutsceneAnalyzer:
 
         Rejects unfinished sentences, mid-clause cuts, or trailing conjunctions.
         """
-        text = cue.get("text", "").strip()
+        text = self._strip_sound_tags(cue.get("text", ""))
         result: Dict[str, Any] = {
             "has_payoff": False,
             "score": 0.0,
@@ -193,6 +195,7 @@ class CutsceneAnalyzer:
             base_score -= 1.0
 
         # 6. Evaluation threshold
+        word_count = len(re.findall(r"\b[a-zA-Z']+\b", text))
         if matched_category:
             result["has_payoff"] = True
             result["score"] = round(base_score, 2)
@@ -201,6 +204,13 @@ class CutsceneAnalyzer:
         elif base_score >= 4.0 and bool(terminal_punct):
             result["has_payoff"] = True
             result["score"] = round(base_score, 2)
+            result["payoff_type"] = "definitive_closure"
+        elif not terminal_punct and pause_duration >= 1.5 and word_count >= 3 and (
+            self.score_text(text) >= 1.5 or pause_duration >= 2.0
+        ):
+            # Support unpunctuated YouTube auto-captions ending cleanly on a lingering dramatic beat
+            result["has_payoff"] = True
+            result["score"] = round(max(4.0, base_score + 0.5), 2)
             result["payoff_type"] = "definitive_closure"
         else:
             result["has_payoff"] = False
@@ -290,6 +300,8 @@ class CutsceneAnalyzer:
         n = len(cues)
 
         for i in range(n):
+            if not self._strip_sound_tags(cues[i].get("text", "")):
+                continue
             start_time = cues[i]["start"]
             hook_score = self.score_hook(cues[i])
             current_cues = []
@@ -302,8 +314,12 @@ class CutsceneAnalyzer:
                 if dur > max_duration:
                     break
 
+                speech_text = self._strip_sound_tags(cue.get("text", ""))
+                if not speech_text:
+                    continue
+
                 current_cues.append(cue)
-                accumulated_body_score += self.score_text(cue["text"])
+                accumulated_body_score += self.score_text(speech_text)
 
                 if dur >= min_duration:
                     if len(current_cues) < min_dialogue_lines:

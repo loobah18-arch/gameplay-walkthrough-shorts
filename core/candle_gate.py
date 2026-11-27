@@ -16,8 +16,9 @@ Implements the 2-layer algorithmic rules governing when to upload the next video
 import sys
 import json
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 
 DEFAULT_STATE_FILE = Path(__file__).resolve().parent.parent / "candle_gate_state.json"
 
@@ -273,7 +274,9 @@ class CandleGate:
         except Exception:
             return {}
 
-    def evaluate_live_channel(self, youtube_client=None, history_path: Path = None) -> Dict[str, Any]:
+    def evaluate_live_channel(
+        self, youtube_client=None, history_path: Path = None, now: Optional[datetime] = None
+    ) -> Dict[str, Any]:
         """
         Polls YouTube Data API v3 for the channel's most recent video performance.
         Computes velocity and blocks uploads if an active push is in progress.
@@ -282,7 +285,6 @@ class CandleGate:
             return self.load_state()
 
         try:
-            from datetime import datetime, timezone
 
             vid_id = None
             title = "Previous Short"
@@ -337,7 +339,10 @@ class CandleGate:
 
             total_views = int(v_items[0]["statistics"].get("viewCount", 0))
             published_at = datetime.fromisoformat(published_at_str.replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
+            eval_now = now or datetime.now(timezone.utc)
+            if eval_now.tzinfo is None:
+                eval_now = eval_now.replace(tzinfo=timezone.utc)
+            now = eval_now
             elapsed_hours = max((now - published_at).total_seconds() / 3600.0, 0.1)
 
             # Load previous snapshot from state

@@ -123,6 +123,19 @@ class TestCutsceneAnalyzer(unittest.TestCase):
         self.assertEqual(len(relaxed), 1)
         self.assertLessEqual(relaxed[0]["duration"], 40.0)
 
+    def test_auto_generated_unpunctuated_captions_with_dramatic_beat(self):
+        cues = [
+            {"start": 0.0, "end": 4.0, "text": "[Music]"},
+            {"start": 5.0, "end": 14.0, "text": "where are they hiding now"},
+            {"start": 14.2, "end": 24.0, "text": "we need to protect our family"},
+            {"start": 24.5, "end": 34.0, "text": "don't lie to me anymore"},
+            {"start": 34.2, "end": 41.0, "text": "this is my final choice [Music]"},
+            {"start": 45.0, "end": 50.0, "text": "[Music]"},
+        ]
+        segs = self.analyzer.find_viral_segments(cues, min_duration=25, max_duration=58, require_payoff=True)
+        self.assertGreater(len(segs), 0)
+        self.assertEqual(segs[0]["dialogue_count"], 4)
+
     def test_generate_short_title(self):
         title = CutsceneAnalyzer.generate_short_title(
             "Detroit: Become Human",

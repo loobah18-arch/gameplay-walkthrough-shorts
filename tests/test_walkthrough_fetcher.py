@@ -68,6 +68,19 @@ I am just a machine, not a living being.
         self.assertIn("--proxy", fallback_cmd)
         self.assertIn("http://proxy:8080", fallback_cmd)
 
+    @patch("core.walkthrough_fetcher.glob.glob", return_value=[])
+    @patch("core.walkthrough_fetcher.subprocess.run")
+    def test_fetch_transcript_tries_mobile_clients_before_web_bgutil(self, mock_run, _mock_glob):
+        mock_run.return_value = MagicMock(returncode=1, stderr="no subs")
+        fetcher = WalkthroughFetcher()
+        cues = fetcher.fetch_transcript("https://youtube.com/watch?v=vid123", "vid123")
+        self.assertEqual(cues, [])
+        first_cmd = mock_run.call_args_list[0].args[0]
+        second_cmd = mock_run.call_args_list[1].args[0]
+        self.assertIn("youtube:player_client=ios,android_vr", first_cmd)
+        self.assertIn("youtube:player_client=web,mweb", second_cmd)
+        self.assertTrue(any("youtubepot-bgutilhttp:base_url=" in a for a in second_cmd))
+
 
 if __name__ == "__main__":
     unittest.main()
