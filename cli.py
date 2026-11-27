@@ -352,26 +352,35 @@ def cmd_render_cloud_job(args):
         game_slug = re.sub(r"[^a-zA-Z0-9]+", "_", game_name.lower())
         top_question = qm.generate_question(game_key=game_slug, game_name=game_name, cutscene_title=raw_output_name)
 
-    cues_to_burn = []
+    words_to_burn = []
     if args.enable_subtitles:
         try:
-            print("📝 Generating styled ASS subtitles...")
-            fetcher = WalkthroughFetcher()
-            cues = fetcher.fetch_transcript(video_url, video_id=vid_key, cookies_path=args.cookies, proxy=args.proxy)
-            cues_to_burn = [c for c in cues if c["end"] > start_time and c["start"] < end_time]
-        except Exception as e:
-            print(f"⚠️ Subtitle generation error ({e}); rendering without burned dialogue.")
+            print("🎙️ Transcribing cutscene audio for frame-accurate word-level subtitles...")
+            words_to_burn = SubtitleBuilder.transcribe_audio_words(actual_raw, temp_dir=TEMP_DIR)
+            if words_to_burn:
+                print(f"✅ Transcribed {len(words_to_burn)} words directly from cutscene audio.")
+        except Exception as e_w:
+            print(f"⚠️ Audio transcription notice ({e_w}); checking VTT fallback...")
 
-    if cues_to_burn or top_question:
-        SubtitleBuilder.generate_ass(
-            cues=cues_to_burn,
+        if not words_to_burn:
+            try:
+                print("📝 Fetching transcript fallback cues...")
+                fetcher = WalkthroughFetcher()
+                cues = fetcher.fetch_transcript(video_url, video_id=vid_key, cookies_path=args.cookies, proxy=args.proxy)
+                cues_to_burn = [c for c in cues if c["end"] > start_time and c["start"] < end_time]
+                words_to_burn = SubtitleBuilder.cues_to_words(cues_to_burn, time_offset=start_time)
+            except Exception as e:
+                print(f"⚠️ Subtitle generation error ({e}); rendering without burned dialogue.")
+
+    if words_to_burn or top_question:
+        SubtitleBuilder.generate_anidoc_ass(
+            words=words_to_burn,
             output_path=ass_path,
             aspect_ratio_key=args.aspect_ratio,
-            time_offset=start_time,
             max_duration=clip_duration,
             top_question=top_question,
         )
-        print(f"✅ Generated ASS with top engaging question at {ass_path}")
+        print(f"✅ Generated AniDoc-style ASS with top engaging question at {ass_path}")
     else:
         ass_path = None
 
