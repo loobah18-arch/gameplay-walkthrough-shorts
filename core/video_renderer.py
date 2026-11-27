@@ -15,6 +15,8 @@ from config.settings import (
     VIDEO_FILTER_ENHANCE,
     OUTPUT_DIR,
     TEMP_DIR,
+    DEFAULT_BGM_PATH,
+    DEFAULT_BGM_VOLUME,
 )
 
 
@@ -385,34 +387,70 @@ class VideoRenderer:
         ass_subtitle_path: Optional[str] = None,
         apply_enhancements: bool = True,
         normalize_audio: bool = True,
+        bgm_path: Optional[str] = None,
+        bgm_volume: float = DEFAULT_BGM_VOLUME,
     ) -> List[str]:
         """
-        Builds full FFmpeg command for rendering.
+        Builds full FFmpeg command for rendering, with optional looping background music.
         """
-        cmd = ["ffmpeg", "-y", "-i", raw_input]
+        has_bgm = bool(bgm_path and os.path.isfile(bgm_path))
 
-        if aspect_ratio == "vertical_blurred":
-            filter_complex = cls.build_ffmpeg_filtergraph(
-                aspect_ratio=aspect_ratio,
-                ass_subtitle_path=ass_subtitle_path,
-                apply_enhancements=apply_enhancements,
-            )
-            cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "0:a?"])
-        else:
+        if has_bgm:
+            cmd = ["ffmpeg", "-y", "-i", raw_input, "-stream_loop", "-1", "-i", bgm_path]
+
             vf = cls.build_ffmpeg_filtergraph(
                 aspect_ratio=aspect_ratio,
                 ass_subtitle_path=ass_subtitle_path,
                 apply_enhancements=apply_enhancements,
             )
-            cmd.extend(["-vf", vf])
 
-        if normalize_audio:
-            af = (
-                f"loudnorm=I={AUDIO_NORM_SETTINGS['integrated_lufs']}:"
-                f"TP={AUDIO_NORM_SETTINGS['true_peak']}:"
-                f"LRA={AUDIO_NORM_SETTINGS['loudness_range']}"
+            if aspect_ratio == "vertical_blurred":
+                v_filter = vf
+            else:
+                v_filter = f"[0:v]{vf}[v]"
+
+            if normalize_audio:
+                norm_filter = (
+                    f",loudnorm=I={AUDIO_NORM_SETTINGS['integrated_lufs']}:"
+                    f"TP={AUDIO_NORM_SETTINGS['true_peak']}:"
+                    f"LRA={AUDIO_NORM_SETTINGS['loudness_range']}"
+                )
+            else:
+                norm_filter = ""
+
+            a_filter = (
+                f"[0:a]aresample=async=1[a0];"
+                f"[1:a]volume={bgm_volume:.2f}[abgm];"
+                f"[a0][abgm]amix=inputs=2:duration=first:dropout_transition=2{norm_filter}[a]"
             )
-            cmd.extend(["-af", af])
+
+            filter_complex = f"{v_filter};{a_filter}"
+            cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]"])
+        else:
+            cmd = ["ffmpeg", "-y", "-i", raw_input]
+
+            if aspect_ratio == "vertical_blurred":
+                filter_complex = cls.build_ffmpeg_filtergraph(
+                    aspect_ratio=aspect_ratio,
+                    ass_subtitle_path=ass_subtitle_path,
+                    apply_enhancements=apply_enhancements,
+                )
+                cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "0:a?"])
+            else:
+                vf = cls.build_ffmpeg_filtergraph(
+                    aspect_ratio=aspect_ratio,
+                    ass_subtitle_path=ass_subtitle_path,
+                    apply_enhancements=apply_enhancements,
+                )
+                cmd.extend(["-vf", vf])
+
+            if normalize_audio:
+                af = (
+                    f"loudnorm=I={AUDIO_NORM_SETTINGS['integrated_lufs']}:"
+                    f"TP={AUDIO_NORM_SETTINGS['true_peak']}:"
+                    f"LRA={AUDIO_NORM_SETTINGS['loudness_range']}"
+                )
+                cmd.extend(["-af", af])
 
         cmd.extend([
             "-c:v", "libx264",
@@ -432,16 +470,21 @@ class VideoRenderer:
         output_filename: str,
         aspect_ratio: str = "square",
         ass_subtitle_path: Optional[str] = None,
+        bgm_path: Optional[str] = None,
     ) -> str:
         """
         Executes FFmpeg locally in cloud runner environment.
         """
+        if bgm_path is None and os.path.isfile(DEFAULT_BGM_PATH):
+            bgm_path = DEFAULT_BGM_PATH
+
         final_output = os.path.join(self.output_dir, output_filename)
         cmd = self.build_ffmpeg_render_cmd(
             raw_input=raw_video_path,
             output_file=final_output,
             aspect_ratio=aspect_ratio,
             ass_subtitle_path=ass_subtitle_path,
+            bgm_path=bgm_path,
         )
 
         subprocess.run(cmd, check=True)

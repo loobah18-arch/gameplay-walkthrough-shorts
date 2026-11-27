@@ -9,6 +9,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = BASE_DIR
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+
+# Default Background Music Asset
+DEFAULT_BGM_PATH = os.path.join(ASSETS_DIR, "audio", "default_bgm.mp3")
+DEFAULT_BGM_VOLUME = float(os.environ.get("BGM_VOLUME", 0.22))
 
 # Default GitHub Repo & Action Workflow for Cloud Dispatch
 DEFAULT_GITHUB_REPO = "loobah18-arch/gameplay-walkthrough-shorts"

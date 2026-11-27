@@ -92,6 +92,25 @@ class TestVideoRenderer(unittest.TestCase):
         self.assertIn("loudnorm=", " ".join(cmd))
         self.assertIn("final.mp4", cmd)
 
+    def test_build_ffmpeg_render_cmd_with_bgm(self):
+        cmd = VideoRenderer.build_ffmpeg_render_cmd(
+            raw_input="raw.mp4",
+            output_file="final.mp4",
+            aspect_ratio="vertical_letterbox",
+            ass_subtitle_path="subs.ass",
+            bgm_path="assets/audio/default_bgm.mp3",
+            bgm_volume=0.22,
+        )
+        self.assertEqual(cmd[0], "ffmpeg")
+        cmd_str = " ".join(cmd)
+        self.assertIn("-stream_loop -1 -i assets/audio/default_bgm.mp3", cmd_str)
+        self.assertIn("-filter_complex", cmd)
+        self.assertIn("amix=inputs=2:duration=first", cmd_str)
+        self.assertIn("volume=0.22", cmd_str)
+        self.assertIn("loudnorm=", cmd_str)
+        self.assertIn("-map [v]", cmd_str)
+        self.assertIn("-map [a]", cmd_str)
+
 
 if __name__ == "__main__":
     unittest.main()
