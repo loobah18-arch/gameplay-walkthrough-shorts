@@ -102,5 +102,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T11:01:46.815197+00:00",
+    "title": "ENDING 2 | Detroit: Become Human",
+    "game_name": "Detroit: Become Human",
+    "source_video_id": "5ocwvVf_Om4",
+    "cutscene_title": "ENDING_2_letterbox.mp4",
+    "top_question": "DETROIT: BECOME HUMAN STORY CLIMAX | DID HE MAKE THE RIGHT CHOICE?",
+    "file": "ENDING_2_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
