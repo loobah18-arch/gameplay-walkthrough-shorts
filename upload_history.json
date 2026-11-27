@@ -89,5 +89,18 @@
     "published": true,
     "youtube_id": "0S-SssUoOpk",
     "status": "published"
+  },
+  {
+    "timestamp": "2026-11-27T10:20:15.785310+00:00",
+    "title": "The Interrogation | Detroit: Become Human",
+    "game_name": "Detroit: Become Human",
+    "source_video_id": "MaCDdOaYKa8",
+    "cutscene_title": "The_Interrogation_letterbox.mp4",
+    "top_question": "THE INTERROGATION | COULD ANYONE SURVIVE THIS CONFRONTATION?",
+    "file": "The_Interrogation_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
