@@ -1,0 +1,32 @@
+name: 🎵 Identify BGM with Shazam
+
+on:
+  workflow_dispatch:
+
+jobs:
+  identify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install shazamio & Identify
+        run: |
+          pip install shazamio
+          python3 -c "
+          import asyncio
+          from shazamio import Shazam
+
+          async def main():
+              shazam = Shazam()
+              out = await shazam.recognize('assets/audio/default_bgm.mp3')
+              track = out.get('track', {})
+              title = track.get('title')
+              subtitle = track.get('subtitle')
+              print(f'MATCH_TITLE={title}')
+              print(f'MATCH_ARTIST={subtitle}')
+              print(f'FULL_TRACK={track}')
+
+          asyncio.run(main())
+          "
