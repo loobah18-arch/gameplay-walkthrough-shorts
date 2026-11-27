@@ -4,7 +4,7 @@ on:
   schedule:
     # Auto-calculated by core/schedule_updater.py to trigger at the exact 24h due minute (UTC).
     # Falls back to hourly check ('0 * * * *') when no published upload exists yet.
-    - cron: '0 * * * *'
+    - cron: '38 6 * * *'
 
   workflow_dispatch:
     inputs:
