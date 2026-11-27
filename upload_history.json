@@ -115,5 +115,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T11:22:18.709987+00:00",
+    "title": "The android escape | Detroit: Become Human",
+    "game_name": "Detroit: Become Human",
+    "source_video_id": "RvUFfpZ-Fw4",
+    "cutscene_title": "The_android_escape_letterbox.mp4",
+    "top_question": "THE ANDROID ESCAPE | DID HE MAKE THE RIGHT CHOICE?",
+    "file": "The_android_escape_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
