@@ -14,25 +14,23 @@ jobs:
       - name: Install Tools
         run: |
           pip install faster-whisper shazamio
-      - name: Run Whisper & Shazam Analysis
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Slice Audio & Run Shazam
         run: |
+          # Slice 2s to 10s (pure music, no intro/outro)
+          ffmpeg -y -i assets/audio/default_bgm.mp3 -ss 00:00:02 -to 00:00:10 -c:a pcm_s16le clean_slice.wav
           python3 -c "
           import asyncio
-          from faster_whisper import WhisperModel
           from shazamio import Shazam
 
-          print('=== 1. WHISPER TRANSCRIPTION ===')
-          model = WhisperModel('small', device='cpu', compute_type='int8')
-          segments, info = model.transcribe('assets/audio/default_bgm.mp3')
-          print('Detected language:', info.language, 'prob:', info.language_probability)
-          transcription = ' '.join([s.text for s in segments])
-          print('TRANSCRIPTION:', transcription)
-
-          print('=== 2. SHAZAM RECOGNITION ===')
-          async def run_shazam():
+          async def run():
               shazam = Shazam()
-              out = await shazam.recognize('assets/audio/default_bgm.mp3')
-              print('SHAZAM_MATCHES:', out.get('matches'))
-              print('SHAZAM_TRACK:', out.get('track'))
-          asyncio.run(run_shazam())
+              out = await shazam.recognize('clean_slice.wav')
+              track = out.get('track')
+              print('CLEAN_SLICE_MATCH:', track)
+              if track:
+                  print('FOUND_TITLE:', track.get('title'))
+                  print('FOUND_ARTIST:', track.get('subtitle'))
+          asyncio.run(run())
           "
+          python3 test_segments.py
