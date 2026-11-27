@@ -9,12 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       game:
-        description: 'Target Game (auto = rotate catalog, or detroit_become_human, gta_v, red_dead_redemption_2, god_of_war_ragnarok, cyberpunk_2077, the_last_of_us)'
+        description: 'Target Game (auto = rotate catalog, or gta_6, detroit_become_human, gta_v, red_dead_redemption_2, god_of_war_ragnarok, cyberpunk_2077, the_last_of_us)'
         required: false
         default: 'auto'
         type: choice
         options:
           - 'auto'
+          - 'gta_6'
           - 'detroit_become_human'
           - 'gta_v'
           - 'red_dead_redemption_2'

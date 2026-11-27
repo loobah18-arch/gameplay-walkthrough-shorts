@@ -62,6 +62,18 @@
       "characters": ["Arthur Morgan", "Dutch van der Linde", "John Marston", "Micah Bell", "Sadie Adler"],
       "dramatic_themes": ["Redemption", "Loyalty", "Betrayal", "Final Stand"]
     },
+    "gta_6": {
+      "id": "gta_6",
+      "name": "Grand Theft Auto VI",
+      "search_queries": [
+        "GTA 6 Trailer 1 All Cutscenes 4K 60fps",
+        "GTA 6 Lucia and Jason Story Cutscenes Breakdown",
+        "GTA 6 Vice City Official Cinematic Trailer 4K",
+        "GTA 6 Leaked Story Cutscenes Dialogue"
+      ],
+      "characters": ["Lucia", "Jason", "Vice City Police", "Stefanie"],
+      "dramatic_themes": ["Trust", "Vice City Crime", "Bonnie and Clyde Duo", "Heists and Chaos"]
+    },
     "god_of_war_ragnarok": {
       "id": "god_of_war_ragnarok",
       "name": "God of War Ragnarök",
