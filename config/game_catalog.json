@@ -26,6 +26,12 @@
       "handle": "@RabidRetrospectGames",
       "url": "https://www.youtube.com/@RabidRetrospectGames/videos",
       "channel_id": "UCCTNXqhWPba9Xh8gx0EKOtQ"
+    },
+    {
+      "name": "AFGuidesHD",
+      "handle": "@AFGuidesHD",
+      "url": "https://www.youtube.com/@AFGuidesHD/videos",
+      "channel_id": "UCU3294P7g5t6NqN3sFm2Ykg"
     }
   ],
   "games": {
@@ -66,10 +72,10 @@
       "id": "gta_6",
       "name": "Grand Theft Auto VI",
       "search_queries": [
-        "GTA 6 Trailer 1 All Cutscenes 4K 60fps",
-        "GTA 6 Lucia and Jason Story Cutscenes Breakdown",
-        "GTA 6 Vice City Official Cinematic Trailer 4K",
-        "GTA 6 Leaked Story Cutscenes Dialogue"
+        "GTA 6 Full Game Walkthrough - Grand Theft Auto VI Gameplay",
+        "GTA 6 Full Game Walkthrough AFGuidesHD",
+        "GTA 6 All Cutscenes Full Movie 4K 60fps",
+        "Grand Theft Auto VI Gameplay Walkthrough Cutscenes"
       ],
       "characters": ["Lucia", "Jason", "Vice City Police", "Stefanie"],
       "dramatic_themes": ["Trust", "Vice City Crime", "Bonnie and Clyde Duo", "Heists and Chaos"]
