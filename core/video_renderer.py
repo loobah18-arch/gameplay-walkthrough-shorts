@@ -421,7 +421,8 @@ class VideoRenderer:
             a_filter = (
                 f"[0:a]aresample=async=1[a0];"
                 f"[1:a]volume={bgm_volume:.2f}[abgm];"
-                f"[a0][abgm]amix=inputs=2:duration=first:dropout_transition=2{norm_filter}[a]"
+                f"[abgm][a0]sidechaincompress=threshold=0.08:ratio=8:attack=20:release=300[ducked_bgm];"
+                f"[a0][ducked_bgm]amix=inputs=2:duration=first:dropout_transition=2{norm_filter}[a]"
             )
 
             filter_complex = f"{v_filter};{a_filter}"

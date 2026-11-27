@@ -105,6 +105,7 @@ class TestVideoRenderer(unittest.TestCase):
         cmd_str = " ".join(cmd)
         self.assertIn("-stream_loop -1 -i assets/audio/default_bgm.mp3", cmd_str)
         self.assertIn("-filter_complex", cmd)
+        self.assertIn("sidechaincompress=", cmd_str)
         self.assertIn("amix=inputs=2:duration=first", cmd_str)
         self.assertIn("volume=0.22", cmd_str)
         self.assertIn("loudnorm=", cmd_str)

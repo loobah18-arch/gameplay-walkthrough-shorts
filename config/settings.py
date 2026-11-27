@@ -13,7 +13,7 @@ ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
 # Default Background Music Asset
 DEFAULT_BGM_PATH = os.path.join(ASSETS_DIR, "audio", "default_bgm.mp3")
-DEFAULT_BGM_VOLUME = float(os.environ.get("BGM_VOLUME", 0.22))
+DEFAULT_BGM_VOLUME = float(os.environ.get("BGM_VOLUME", 0.08))
 
 # Default GitHub Repo & Action Workflow for Cloud Dispatch
 DEFAULT_GITHUB_REPO = "loobah18-arch/gameplay-walkthrough-shorts"
