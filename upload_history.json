@@ -50,5 +50,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-27T06:10:35.782987+00:00",
+    "title": "The final showdown | Grand Theft Auto V",
+    "game_name": "Grand Theft Auto V",
+    "source_video_id": "2XjABKZAGgg",
+    "cutscene_title": "The_final_showdown_letterbox.mp4",
+    "top_question": "THE FINAL SHOWDOWN | DID HE MAKE THE RIGHT CHOICE?",
+    "file": "The_final_showdown_letterbox.mp4",
+    "duration": 55.0,
+    "published": false,
+    "youtube_id": "",
+    "status": "ready_for_upload"
   }
 ]
