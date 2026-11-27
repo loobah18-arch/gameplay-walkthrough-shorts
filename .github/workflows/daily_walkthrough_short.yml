@@ -27,9 +27,9 @@ on:
         default: false
         type: boolean
       publish_to_youtube:
-        description: 'Publish rendered Short to YouTube (default: false)'
+        description: 'Publish rendered Short to YouTube (default: true)'
         required: false
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -208,9 +208,9 @@ jobs:
             FORCE_ARG=(--force)
           fi
 
-          UPLOAD_ARG=(--no-upload)
-          if [ "${{ inputs.publish_to_youtube }}" = "true" ]; then
-            UPLOAD_ARG=(--upload)
+          UPLOAD_ARG=(--upload)
+          if [ "${{ inputs.publish_to_youtube }}" = "false" ]; then
+            UPLOAD_ARG=(--no-upload)
           fi
 
           python3 cli.py daily-job \
