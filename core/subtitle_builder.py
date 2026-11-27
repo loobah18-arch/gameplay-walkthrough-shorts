@@ -219,9 +219,51 @@ class SubtitleBuilder:
                                 "s": round(float(w.start), 2),
                                 "e": round(float(w.end), 2),
                             })
+                elif getattr(seg, "text", None):
+                    raw_toks = [clean_token(t) for t in seg.text.split()]
+                    raw_toks = [t for t in raw_toks if t]
+                    if raw_toks:
+                        dur = max(0.2, float(seg.end) - float(seg.start))
+                        per_w = dur / len(raw_toks)
+                        for i, tok in enumerate(raw_toks):
+                            words.append({
+                                "w": tok,
+                                "s": round(float(seg.start) + i * per_w, 2),
+                                "e": round(float(seg.start) + (i + 1) * per_w, 2),
+                            })
+
+            if not words:
+                # Retry without VAD in case video score/BGM masked dialogue
+                print("🎙️ Retrying Whisper without VAD filter...")
+                segs2, _ = model.transcribe(wav_path, beam_size=1, word_timestamps=True, vad_filter=False)
+                for seg in segs2:
+                    if getattr(seg, "words", None):
+                        for w in seg.words:
+                            cleaned = clean_token(w.word)
+                            if cleaned:
+                                words.append({
+                                    "w": cleaned,
+                                    "s": round(float(w.start), 2),
+                                    "e": round(float(w.end), 2),
+                                })
+                    elif getattr(seg, "text", None):
+                        raw_toks = [clean_token(t) for t in seg.text.split()]
+                        raw_toks = [t for t in raw_toks if t]
+                        if raw_toks:
+                            dur = max(0.2, float(seg.end) - float(seg.start))
+                            per_w = dur / len(raw_toks)
+                            for i, tok in enumerate(raw_toks):
+                                words.append({
+                                    "w": tok,
+                                    "s": round(float(seg.start) + i * per_w, 2),
+                                    "e": round(float(seg.start) + (i + 1) * per_w, 2),
+                                })
+
             if words:
                 print(f"✅ faster-whisper transcribed {len(words)} frame-accurate words.")
                 return words
+            else:
+                print("ℹ️ Whisper found no speech dialogue in this cutscene window.")
         except ImportError:
             print("ℹ️ faster-whisper not installed; using transcript cue fallback.")
         except Exception as e_whisper:
