@@ -128,5 +128,18 @@
     "published": false,
     "youtube_id": "",
     "status": "ready_for_upload"
+  },
+  {
+    "timestamp": "2026-11-28T08:49:49.333305+00:00",
+    "title": "Story | Grand Theft Auto VI",
+    "game_name": "Grand Theft Auto VI",
+    "source_video_id": "YDNs_sPEcJc",
+    "cutscene_title": "Story_letterbox.mp4",
+    "top_question": "IS GTA 6 THE GREATEST GAME EVER MADE?",
+    "file": "Story_letterbox.mp4",
+    "duration": 55.0,
+    "published": true,
+    "youtube_id": "UAHJpb3mWHY",
+    "status": "published"
   }
 ]
